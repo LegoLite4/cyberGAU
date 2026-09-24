@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cybergau}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-cybergau}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cybergau} -d ${POSTGRES_DB:-cybergau}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: ./apps/api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "4000"
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        API_PROXY_TARGET: http://api:4000
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${WEB_PORT:-3000}:3000"
+
+volumes:
+  pgdata:

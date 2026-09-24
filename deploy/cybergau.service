@@ -1,0 +1,15 @@
+[Unit]
+Description=cyberGAU web, API and database
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/cybergau
+ExecStart=/usr/bin/docker compose --env-file /opt/cybergau/.env up -d
+ExecStop=/usr/bin/docker compose --env-file /opt/cybergau/.env down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

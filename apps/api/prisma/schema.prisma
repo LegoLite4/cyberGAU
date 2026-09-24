@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String         @id @default(cuid())
+  steamId     String         @unique
+  personaName String
+  avatarUrl   String?
+  cs2Hours    Int?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  sessions    Session[]
+  ownedLobbies Lobby[]       @relation("LobbyOwner")
+  memberships LobbyMember[]
+  messages    LobbyMessage[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model ServerSlot {
+  id             String   @id @default(cuid())
+  label          String
+  pterodactylId  Int?
+  identifier     String?  @unique
+  status         String   @default("free")
+  purpose        String   @default("pool")
+  mode           String?
+  allocationHost String?
+  allocationPort Int?
+  lobby          Lobby?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Lobby {
+  id           String         @id @default(cuid())
+  title        String
+  visibility   String
+  format       String
+  map          String
+  slots        Int
+  password     String?
+  maxPing      Int?
+  minHours     Int?
+  status       String         @default("waiting")
+  inviteCode   String         @unique
+  ownerId      String
+  owner        User           @relation("LobbyOwner", fields: [ownerId], references: [id])
+  serverSlotId String?        @unique
+  serverSlot   ServerSlot?    @relation(fields: [serverSlotId], references: [id])
+  connectHost  String?
+  connectPort  Int?
+  error        String?
+  members      LobbyMember[]
+  messages     LobbyMessage[]
+  createdAt    DateTime       @default(now())
+  startedAt    DateTime?
+  endedAt      DateTime?
+}
+
+model LobbyMember {
+  id       String   @id @default(cuid())
+  lobbyId  String
+  userId   String
+  pingMs   Int?
+  lobby    Lobby    @relation(fields: [lobbyId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime @default(now())
+
+  @@unique([lobbyId, userId])
+}
+
+model LobbyMessage {
+  id        String   @id @default(cuid())
+  lobbyId   String
+  userId    String
+  body      String
+  lobby     Lobby    @relation(fields: [lobbyId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
