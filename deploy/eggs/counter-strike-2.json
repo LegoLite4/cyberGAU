@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "version": "PTDL_v2",
+    "update_url": null
+  },
+  "name": "Counter-Strike 2",
+  "author": "cybergau@local",
+  "description": "CS2 dedicated server for the cyberGAU lobby pool.",
+  "features": null,
+  "docker_images": {
+    "SteamCMD": "ghcr.io/ptero-eggs/steamcmd:sniper"
+  },
+  "file_denylist": [],
+  "startup": "LD_LIBRARY_PATH=\"$HOME/game/bin/linuxsteamrt64:$LD_LIBRARY_PATH\" ./game/bin/linuxsteamrt64/cs2 -dedicated $( [ \"$VAC_ENABLED\" == \"1\" ] || printf %s ' -insecure' ) -ip 0.0.0.0 -port {{SERVER_PORT}} -tv_port {{TV_PORT}} -maxplayers {{MAX_PLAYERS}} $( [ \"$RCON_ENABLED\" == \"0\" ] || printf %s ' -usercon' ) +game_mode {{GAME_MODE}} +game_type {{GAME_TYPE}} +map {{SRCDS_MAP}} +hostname \"{{SERVER_NAME}}\" +sv_password \"{{SERVER_PASSWORD}}\" +rcon_password \"{{RCON_PASSWORD}}\" +sv_setsteamaccount {{STEAM_GSLT}}",
+  "config": {
+    "files": {},
+    "startup": {
+      "done": "Host activate",
+      "userInteraction": []
+    },
+    "logs": {},
+    "stop": "quit"
+  },
+  "scripts": {
+    "installation": {
+      "container": "ghcr.io/ptero-eggs/installers:debian",
+      "entrypoint": "bash",
+      "script": "#!/bin/bash\nif [[ \"${STEAM_USER}\" == \"\" ]]; then\n  STEAM_USER=anonymous\n  STEAM_PASS=\"\"\n  STEAM_AUTH=\"\"\nfi\ncd /tmp\nmkdir -p /mnt/server/steamcmd\ncurl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\ntar -xzf steamcmd.tar.gz -C /mnt/server/steamcmd\nmkdir -p /mnt/server/steamapps\ncd /mnt/server/steamcmd\nchown -R root:root /mnt\nexport HOME=/mnt/server\n./steamcmd.sh +force_install_dir /mnt/server +login ${STEAM_USER} ${STEAM_PASS} ${STEAM_AUTH} +app_update ${SRCDS_APPID} validate +quit\nmkdir -p /mnt/server/.steam/sdk32 /mnt/server/.steam/sdk64\ncp -v linux32/steamclient.so /mnt/server/.steam/sdk32/steamclient.so\ncp -v linux64/steamclient.so /mnt/server/.steam/sdk64/steamclient.so\necho \"Installation completed\"\n"
+    }
+  },
+  "variables": [
+    {"name": "Map", "description": "Start map", "env_variable": "SRCDS_MAP", "default_value": "de_dust2", "user_viewable": true, "user_editable": true, "rules": "required|string", "field_type": "text"},
+    {"name": "AppID", "description": "Steam app id", "env_variable": "SRCDS_APPID", "default_value": "730", "user_viewable": false, "user_editable": false, "rules": "required|string|in:730", "field_type": "text"},
+    {"name": "Max Players", "description": "Slots", "env_variable": "MAX_PLAYERS", "default_value": "12", "user_viewable": true, "user_editable": true, "rules": "required|numeric|between:1,64", "field_type": "text"},
+    {"name": "Auto Update", "description": "Update on boot", "env_variable": "AUTO_UPDATE", "default_value": "1", "user_viewable": true, "user_editable": true, "rules": "required|boolean", "field_type": "text"},
+    {"name": "SourceTV Port", "description": "GOTV port", "env_variable": "TV_PORT", "default_value": "27020", "user_viewable": true, "user_editable": false, "rules": "required|integer|between:1025,65535", "field_type": "text"},
+    {"name": "Steam Token", "description": "GSLT, optional on LAN", "env_variable": "STEAM_GSLT", "default_value": "", "user_viewable": true, "user_editable": true, "rules": "nullable|alpha_num|size:32", "field_type": "text"},
+    {"name": "VAC", "description": "Enable VAC", "env_variable": "VAC_ENABLED", "default_value": "0", "user_viewable": true, "user_editable": true, "rules": "required|boolean", "field_type": "text"},
+    {"name": "RCON Enabled", "description": "Enable rcon", "env_variable": "RCON_ENABLED", "default_value": "0", "user_viewable": true, "user_editable": true, "rules": "required|boolean", "field_type": "text"},
+    {"name": "Server Name", "description": "Hostname", "env_variable": "SERVER_NAME", "default_value": "cyberGAU", "user_viewable": true, "user_editable": true, "rules": "required|string|max:64", "field_type": "text"},
+    {"name": "Server Password", "description": "Join password", "env_variable": "SERVER_PASSWORD", "default_value": "", "user_viewable": true, "user_editable": true, "rules": "nullable|alpha_dash|max:30", "field_type": "text"},
+    {"name": "RCON Password", "description": "RCON password", "env_variable": "RCON_PASSWORD", "default_value": "cybergau", "user_viewable": true, "user_editable": true, "rules": "required|alpha_dash|between:1,30", "field_type": "text"},
+    {"name": "Game Mode", "description": "game_mode", "env_variable": "GAME_MODE", "default_value": "1", "user_viewable": true, "user_editable": true, "rules": "required|string", "field_type": "text"},
+    {"name": "Game Type", "description": "game_type", "env_variable": "GAME_TYPE", "default_value": "0", "user_viewable": true, "user_editable": true, "rules": "required|string", "field_type": "text"}
+  ]
+}

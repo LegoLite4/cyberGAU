@@ -36,7 +36,7 @@ async function readJson(res: Response): Promise<Json> {
 export async function syncPanelServers(): Promise<void> {
   if (!pterodactylConfigured()) return;
   const { prisma } = await import("./db");
-  const res = await panelFetch("/api/application/servers?per_page=100", env("PTERODACTYL_APP_KEY"));
+  const res = await panelFetch("/api/application/servers?include=allocations&per_page=100", env("PTERODACTYL_APP_KEY"));
   if (!res.ok) return;
   const body = await readJson(res);
   const rows = Array.isArray(body.data) ? body.data : [];
@@ -102,7 +102,7 @@ export async function configureAndStart(slot: {
     GAME_MODE: settings.gameMode,
     GAME_TYPE: settings.gameType,
     MAX_PLAYERS: String(settings.slots),
-    SERVER_PASSWORD: settings.password,
+    SERVER_PASSWORD: settings.password.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 30),
     HOSTNAME: settings.hostname,
   };
   const startup = String(container.startup_command ?? attrs.invocation ?? "");
@@ -131,14 +131,14 @@ export async function configureAndStart(slot: {
     throw new Error("Панель не запустила сервер");
   }
 
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + 180_000;
   let port: number | null = null;
   while (Date.now() < deadline) {
     const stateRes = await panelFetch(`/api/client/servers/${slot.identifier}/resources`, clientKey);
     const stateBody = await readJson(stateRes);
     const stateAttrs = (stateBody.attributes ?? {}) as Json;
     const state = String(stateAttrs.current_state ?? "");
-    const details = await panelFetch(`/api/client/servers/${slot.identifier}`, clientKey);
+    const details = await panelFetch(`/api/client/servers/${slot.identifier}?include=allocations`, clientKey);
     const detailsBody = await readJson(details);
     const detailAttrs = (detailsBody.attributes ?? {}) as Json;
     const allocs = ((detailAttrs.relationships as Json | undefined)?.allocations as Json | undefined)?.data;

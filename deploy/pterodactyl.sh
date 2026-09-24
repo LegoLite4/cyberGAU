@@ -208,32 +208,34 @@ POOL="${POOL_SIZE:-1}"
 EXISTING="$(curl -sf "${AUTH[@]}" "$BASE/api/application/servers?per_page=100" | jq -r '[.data[].attributes.name | select(startswith("cybergau-"))] | length')"
 NEED=$((POOL - EXISTING))
 if [[ "$NEED" -gt 0 ]]; then
-  EGG_JSON=/var/lib/cybergau/cs2-egg.json
+  EGG_JSON=/opt/cybergau/deploy/eggs/counter-strike-2.json
   mkdir -p /var/lib/cybergau
   if [[ ! -s "$EGG_JSON" ]]; then
-    for url in \
-      "https://raw.githubusercontent.com/pterodactyl/eggs/master/game_eggs/steamcmd/counter-strike-2/egg-counter-strike-2.json" \
-      "https://raw.githubusercontent.com/parkervcp/eggs/master/game_eggs/steamcmd_servers/counter_strike_2/egg-counter--strike-2.json"
-    do
-      curl -fsSL "$url" -o "$EGG_JSON" && break || true
-    done
-  fi
-  if [[ -s "$EGG_JSON" ]]; then
-    NEST_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests" | jq -r '.data[0].attributes.id')"
-    php "$PANEL_DIR/artisan" list | grep -q 'p:egg' && php "$PANEL_DIR/artisan" p:import-egg "$EGG_JSON" || true
-    EGG_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs" | jq -r '.data[] | select(.attributes.name|test("Counter-Strike 2|CS2";"i")) | .attributes.id' | head -1)"
+    echo "Нет шаблона CS2: $EGG_JSON"
+  else
+    NEST_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests" | jq -r '.data[0].attributes.id // empty')"
+    if [[ -z "$NEST_ID" ]]; then
+      NEST_ID="$(curl -sf "${AUTH[@]}" -d '{"name":"cyberGAU","description":"CS2 pool"}' "$BASE/api/application/nests" | jq -r '.attributes.id')"
+    fi
+    EGG_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs" | jq -r '.data[] | select(.attributes.name=="Counter-Strike 2") | .attributes.id' | head -1)"
+    if [[ -z "$EGG_ID" ]]; then
+      EGG_ID="$(cd "$PANEL_DIR" && NEST_ID="$NEST_ID" EGG_PATH="$EGG_JSON" php /opt/cybergau/deploy/import-egg.php || true)"
+    fi
     if [[ -n "$EGG_ID" ]]; then
+      RCON_PASSWORD="$(openssl rand -hex 8)"
       for i in $(seq 1 "$NEED"); do
         PORT=$((27015 + EXISTING + i - 1))
         ALLOC="$(curl -sf "${AUTH[@]}" -d "{\"ip\":\"${ALLOC_IP}\",\"ports\":[\"${PORT}\"]}" "$BASE/api/application/nodes/${NODE_ID}/allocations" | jq -r '.data[0].attributes.id // .attributes.id // empty')"
         USER_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/users" | jq -r '.data[0].attributes.id')"
-        STARTUP="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs/${EGG_ID}?include=variables" | jq -r '.attributes.startup')"
-        IMAGE="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs/${EGG_ID}" | jq -r '.attributes.docker_image')"
-        curl -sf "${AUTH[@]}" -d "{\"name\":\"cybergau-$((EXISTING + i))\",\"user\":${USER_ID},\"egg\":${EGG_ID},\"docker_image\":\"${IMAGE}\",\"startup\":\"${STARTUP}\",\"environment\":{\"SRCDS_MAP\":\"de_dust2\",\"STEAM_ACC\":\"\",\"SERVER_NAME\":\"cyberGAU\",\"MAX_PLAYERS\":\"16\",\"GAME_MODE\":\"1\",\"GAME_TYPE\":\"0\"},\"limits\":{\"memory\":${CS2_MEMORY_MB:-2048},\"swap\":0,\"disk\":${CS2_DISK_MB:-40960},\"io\":500,\"cpu\":${CS2_CPU:-200}},\"feature_limits\":{\"databases\":0,\"allocations\":0,\"backups\":0},\"allocation\":{\"default\":${ALLOC}},\"start_on_completion\":false}" \
+        EGG_BODY="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs/${EGG_ID}?include=variables")"
+        STARTUP="$(echo "$EGG_BODY" | jq -r '.attributes.startup')"
+        IMAGE="$(echo "$EGG_BODY" | jq -r '.attributes.docker_image // (.attributes.docker_images | to_entries[0].value) // "ghcr.io/ptero-eggs/steamcmd:sniper"')"
+        ENV_JSON="$(jq -nc --arg rcon "$RCON_PASSWORD" --arg gslt "${STEAM_GSLT:-}" '{SRCDS_MAP:"de_dust2",SRCDS_APPID:"730",MAX_PLAYERS:"16",AUTO_UPDATE:"1",TV_PORT:"27020",STEAM_GSLT:$gslt,VAC_ENABLED:"0",RCON_ENABLED:"0",SERVER_NAME:"cyberGAU",SERVER_PASSWORD:"",RCON_PASSWORD:$rcon,GAME_MODE:"1",GAME_TYPE:"0"}')"
+        curl -sf "${AUTH[@]}" -d "{\"name\":\"cybergau-$((EXISTING + i))\",\"user\":${USER_ID},\"egg\":${EGG_ID},\"docker_image\":\"${IMAGE}\",\"startup\":$(echo "$STARTUP" | jq -Rs .),\"environment\":${ENV_JSON},\"limits\":{\"memory\":${CS2_MEMORY_MB:-2048},\"swap\":0,\"disk\":${CS2_DISK_MB:-40960},\"io\":500,\"cpu\":${CS2_CPU:-200}},\"feature_limits\":{\"databases\":0,\"allocations\":0,\"backups\":0},\"allocation\":{\"default\":${ALLOC}},\"start_on_completion\":false}" \
           "$BASE/api/application/servers" >/dev/null || echo "Слот cybergau-$((EXISTING + i)) не создан"
       done
     else
-      echo "Egg CS2 не импортирован. Положите JSON в $EGG_JSON и повторите deploy/pterodactyl.sh"
+      echo "Egg CS2 не импортирован. Повторите deploy/pterodactyl.sh"
     fi
   fi
 fi

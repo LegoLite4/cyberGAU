@@ -27,13 +27,14 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl git rsync docker.io
+apt-get install -y ca-certificates curl git rsync docker.io qemu-guest-agent
 if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
   apt-get install -y docker-compose-v2
 else
   apt-get install -y docker-compose-plugin || true
 fi
 systemctl enable --now docker
+systemctl enable --now qemu-guest-agent || true
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p /opt/cybergau

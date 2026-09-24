@@ -69,7 +69,7 @@ const createLobbySchema = z.object({
   format: z.string(),
   map: z.string(),
   slots: z.number().int().min(2).max(32).optional(),
-  password: z.string().max(64).optional(),
+  password: z.string().regex(/^[A-Za-z0-9_-]{1,30}$/).optional(),
   maxPing: z.number().int().min(1).max(500).optional(),
   minHours: z.number().int().min(0).max(20000).optional(),
 });
@@ -106,7 +106,10 @@ app.post("/lobbies", async (request, reply) => {
     return toLobbyDto(lobby, user.id);
   } catch (error) {
     reply.code(statusOf(error));
-    return { error: error instanceof Error ? error.message : "Не удалось создать лобби" };
+    const message = error instanceof z.ZodError
+      ? "Проверьте поля. Пароль: латиница, цифры, дефис или подчёркивание, до 30 символов."
+      : error instanceof Error ? error.message : "Не удалось создать лобби";
+    return { error: message };
   }
 });
 

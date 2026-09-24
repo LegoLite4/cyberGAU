@@ -56,4 +56,4 @@ docker compose --env-file .env up -d --build
 
 ## Тестовая VM
 
-Проверка Proxmox: VM 112 называется CyberGAU, она запущена, 10 ядер, 8 ГБ RAM, диск 100 ГБ. В приводе подключён образ Ubuntu 24.04.5, тип гостя Linux. Гостевой агент внутри не отвечает, поэтому с этой Windows-машины нельзя зайти по SSH и выполнить установку удалённо. Когда в госте появится сеть, установка та же: `sudo bash deploy/install.sh` с `CYBERGAU_ACCESS=wireguard` и `POOL_SIZE=1`. На 8 ГБ разумно держать один слот CS2.
+Проверка Proxmox: VM 112 называется CyberGAU, она запущена, 10 ядер, 8 ГБ RAM, диск 100 ГБ. Хост панели в сети `192.168.0.13/24`, этот Windows-ПК в другой сети, поэтому гость отсюда напрямую не открывается. QEMU Guest Agent внутри не запущен. В консоли Ubuntu поставьте `qemu-guest-agent` и включите службу. Дальше: `sudo bash deploy/install.sh` с `CYBERGAU_ACCESS=wireguard` и `POOL_SIZE=1`. На 8 ГБ держите один слот CS2.
