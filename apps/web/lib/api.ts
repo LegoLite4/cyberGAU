@@ -1,9 +1,16 @@
 export type User = {
   id: string;
-  steamId: string;
+  username: string | null;
+  steamId: string | null;
   personaName: string;
   avatarUrl: string | null;
   cs2Hours: number | null;
+  skins: {
+    linked: boolean;
+    count: number;
+    syncedAt: string | null;
+    error: string | null;
+  };
 };
 
 export type Lobby = {
@@ -63,6 +70,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   me: () => request<{ user: User | null }>("/auth/me"),
+  register: (username: string, password: string) =>
+    request<{ user: User }>("/auth/register", { method: "POST", body: JSON.stringify({ username, password }) }),
+  login: (username: string, password: string) =>
+    request<{ user: User }>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+  syncSkins: () => request<{ user: User }>("/skins/sync", { method: "POST" }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   lobbies: (query = "") => request<{ lobbies: Lobby[]; maps: string[]; formats: string[] }>(`/lobbies${query}`),
   lobby: (id: string) => request<Lobby>(`/lobbies/${id}`),

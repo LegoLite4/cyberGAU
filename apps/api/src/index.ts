@@ -2,11 +2,14 @@ import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import { z } from "zod";
-import { clearSession, currentUser, openSession, publicUser, requireUser, steamLoginUrl, upsertSteamUser, verifySteam } from "./auth";
+import { createReadStream } from "fs";
+import { stat } from "fs/promises";
+import { clearSession, currentUser, hashPassword, linkSteam, openSession, requireUser, steamLoginUrl, toPublicUser, verifyPassword, verifySteam } from "./auth";
 import { FORMATS, MAPS, isFormat } from "./catalog";
 import { prisma, publicWebUrl } from "./db";
 import { ensureMockSlot, listLobbies, listModes, newInviteCode, startLobby, startMode, stopLobby, stopMode, toLobbyDto } from "./lobbies";
 import { syncPanelServers } from "./pterodactyl";
+import { loadoutForSteam, pluginZipPath, syncSteamInventory } from "./skins";
 
 const app = Fastify({ logger: true });
 
@@ -28,24 +31,86 @@ function statusOf(error: unknown): number {
 
 app.get("/health", async () => ({ ok: true }));
 
-app.get("/auth/steam", async (_request, reply) => {
+const credentialsSchema = z.object({
+  username: z.string().trim().regex(/^[A-Za-z0-9_]{3,24}$/),
+  password: z.string().min(8).max(72),
+});
+
+app.post("/auth/register", async (request, reply) => {
+  try {
+    const body = credentialsSchema.parse(request.body);
+    const existing = await prisma.user.findUnique({ where: { username: body.username } });
+    if (existing) {
+      reply.code(400);
+      return { error: "Такой логин уже занят" };
+    }
+    const user = await prisma.user.create({
+      data: {
+        username: body.username,
+        passwordHash: hashPassword(body.password),
+        personaName: body.username,
+      },
+    });
+    await openSession(reply, user.id);
+    reply.code(201);
+    return { user: await toPublicUser(user) };
+  } catch (error) {
+    reply.code(statusOf(error));
+    const message = error instanceof z.ZodError
+      ? "Логин: 3–24 символа, латиница, цифры и подчёркивание. Пароль: от 8 символов."
+      : error instanceof Error ? error.message : "Не удалось зарегистрироваться";
+    return { error: message };
+  }
+});
+
+app.post("/auth/login", async (request, reply) => {
+  try {
+    const body = credentialsSchema.parse(request.body);
+    const user = await prisma.user.findUnique({ where: { username: body.username } });
+    if (!user?.passwordHash || !verifyPassword(body.password, user.passwordHash)) {
+      reply.code(401);
+      return { error: "Неверный логин или пароль" };
+    }
+    await openSession(reply, user.id);
+    return { user: await toPublicUser(user) };
+  } catch (error) {
+    reply.code(statusOf(error));
+    const message = error instanceof z.ZodError
+      ? "Логин: 3–24 символа, латиница, цифры и подчёркивание. Пароль: от 8 символов."
+      : error instanceof Error ? error.message : "Не удалось войти";
+    return { error: message };
+  }
+});
+
+app.get("/auth/steam", async (request, reply) => {
+  const user = await currentUser(request);
+  if (!user) {
+    reply.redirect(`${publicWebUrl()}/login?error=${encodeURIComponent("Сначала войдите логином и паролем, затем привяжите Steam")}`);
+    return;
+  }
   reply.redirect(steamLoginUrl());
 });
 
 app.get("/auth/steam/callback", async (request, reply) => {
+  const web = publicWebUrl();
   try {
+    const user = await currentUser(request);
+    if (!user) {
+      reply.redirect(`${web}/login?error=${encodeURIComponent("Сначала войдите логином и паролем, затем привяжите Steam")}`);
+      return;
+    }
     const steamId = await verifySteam(request.query as Record<string, string>);
-    const user = await upsertSteamUser(steamId);
-    await openSession(reply, user.id);
-    reply.redirect(publicWebUrl());
+    await linkSteam(user.id, steamId);
+    reply.redirect(`${web}/profile?steam=linked`);
   } catch (error) {
-    reply.code(401).send({ error: error instanceof Error ? error.message : "Вход не выполнен" });
+    const message = error instanceof Error ? error.message : "Steam не привязан";
+    reply.redirect(`${web}/profile?error=${encodeURIComponent(message)}`);
   }
 });
 
 app.get("/auth/me", async (request) => {
   const user = await currentUser(request);
-  return { user: user ? publicUser(user) : null };
+  return { user: user ? await toPublicUser(user) : null };
 });
 
 app.post("/auth/logout", async (request, reply) => {
@@ -251,6 +316,41 @@ app.post("/lobbies/:id/messages", async (request, reply) => {
   }
 });
 
+app.get("/skins/loadout", async (request, reply) => {
+  const steamId = String((request.query as { steamId?: string }).steamId ?? "");
+  if (!/^\d{17}$/.test(steamId)) {
+    reply.code(400);
+    return { error: "Нужен SteamID" };
+  }
+  return loadoutForSteam(steamId);
+});
+
+app.post("/skins/sync", async (request, reply) => {
+  try {
+    const user = await requireUser(request);
+    if (!user.steamId) throw new Error("Сначала привяжите Steam — это нужно для скинченджера");
+    const items = await syncSteamInventory(user.id, user.steamId);
+    const fresh = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    return { user: await toPublicUser(fresh), items };
+  } catch (error) {
+    reply.code(statusOf(error));
+    return { error: error instanceof Error ? error.message : "Скины не обновлены" };
+  }
+});
+
+app.get("/skins/plugin.zip", async (_request, reply) => {
+  const path = pluginZipPath();
+  try {
+    await stat(path);
+  } catch {
+    reply.code(404);
+    return { error: "Плагин ещё не собран" };
+  }
+  reply.header("content-type", "application/zip");
+  reply.header("cache-control", "no-store");
+  return reply.send(createReadStream(path));
+});
+
 app.get("/modes", async () => ({ modes: await listModes() }));
 
 app.post("/modes/:mode/start", async (request, reply) => {
@@ -290,7 +390,7 @@ app.get("/profile", async (request, reply) => {
       orderBy: { createdAt: "desc" },
       take: 30,
     });
-    return { user: publicUser(user), history: history.map((lobby) => toLobbyDto(lobby, user.id)) };
+    return { user: await toPublicUser(user), history: history.map((lobby) => toLobbyDto(lobby, user.id)) };
   } catch (error) {
     reply.code(statusOf(error));
     return { error: error instanceof Error ? error.message : "Профиль недоступен" };

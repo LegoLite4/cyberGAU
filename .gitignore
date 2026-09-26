@@ -13,6 +13,8 @@ coverage
 apps/api/prisma/*.db
 apps/web/public/uploads
 deploy/local/
+services/skinchanger/bin/
+services/skinchanger/obj/
 *.pem
 wg-client.conf
 wg0.conf

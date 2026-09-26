@@ -15,9 +15,15 @@ services:
       retries: 20
 
   api:
-    build: ./apps/api
+    build:
+      context: ./apps/api
+      network: host
     restart: unless-stopped
     env_file: .env
+    environment:
+      SKINCHANGER_ZIP: /skinchanger/CybergauSkins.zip
+    volumes:
+      - ${SKINCHANGER_DIR:-/var/lib/cybergau/skinchanger}:/skinchanger:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -27,6 +33,7 @@ services:
   web:
     build:
       context: ./apps/web
+      network: host
       args:
         API_PROXY_TARGET: http://api:4000
     restart: unless-stopped

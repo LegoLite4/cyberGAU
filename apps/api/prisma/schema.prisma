@@ -8,17 +8,30 @@ datasource db {
 }
 
 model User {
-  id          String         @id @default(cuid())
-  steamId     String         @unique
-  personaName String
-  avatarUrl   String?
-  cs2Hours    Int?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  sessions    Session[]
-  ownedLobbies Lobby[]       @relation("LobbyOwner")
-  memberships LobbyMember[]
-  messages    LobbyMessage[]
+  id           String         @id @default(cuid())
+  username     String?        @unique
+  passwordHash String?
+  steamId      String?        @unique
+  personaName  String
+  avatarUrl    String?
+  cs2Hours     Int?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  sessions     Session[]
+  ownedLobbies Lobby[]        @relation("LobbyOwner")
+  memberships  LobbyMember[]
+  messages     LobbyMessage[]
+  skinLoadout  SkinLoadout?
+}
+
+model SkinLoadout {
+  id       String   @id @default(cuid())
+  userId   String   @unique
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steamId  String   @unique
+  items    Json
+  error    String?
+  syncedAt DateTime @default(now())
 }
 
 model Session {

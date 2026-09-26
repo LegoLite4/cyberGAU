@@ -47,7 +47,10 @@ export function Header() {
             <button className="btn" onClick={logout}>Выйти</button>
           </>
         ) : (
-          <a className="btn primary" href="/backend/auth/steam">Войти через Steam</a>
+          <>
+            <Link className="btn" href="/login">Войти</Link>
+            <Link className="btn primary" href="/register">Регистрация</Link>
+          </>
         )}
       </div>
     </header>

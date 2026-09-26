@@ -12,8 +12,13 @@ set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a
+# DATABASE_URL от cyberGAU указывает на Postgres и перебивает MariaDB панели.
+unset DATABASE_URL
 
 export DEBIAN_FRONTEND=noninteractive
+export HOME="${HOME:-/root}"
+export COMPOSER_HOME="${COMPOSER_HOME:-/root/.composer}"
+export COMPOSER_PROCESS_TIMEOUT=0
 : "${PANEL_DB_PASSWORD:?}"
 : "${ADMIN_EMAIL:?}"
 : "${ADMIN_PASSWORD:?}"
@@ -36,7 +41,7 @@ mysql -e "GRANT ALL PRIVILEGES ON panel.* TO 'pterodactyl'@'127.0.0.1' WITH GRAN
 mysql -e "FLUSH PRIVILEGES;"
 
 PANEL_DIR=/var/www/pterodactyl
-if [[ ! -f "$PANEL_DIR/artisan" ]]; then
+if [[ ! -f "$PANEL_DIR/.env" ]] || ! grep -q '^APP_KEY=base64:' "$PANEL_DIR/.env"; then
   mkdir -p "$PANEL_DIR"
   cd "$PANEL_DIR"
   curl -L -o panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
@@ -54,6 +59,24 @@ if [[ ! -f "$PANEL_DIR/artisan" ]]; then
     --queue=redis \
     --settings-ui=yes \
     --telemetry=false || true
+  php artisan p:environment:database \
+    --host=127.0.0.1 \
+    --port=3306 \
+    --database=panel \
+    --username=pterodactyl \
+    --password="$PANEL_DB_PASSWORD"
+  php artisan migrate --seed --force
+  php artisan p:user:make \
+    --email="$ADMIN_EMAIL" \
+    --username="${ADMIN_USER:-admin}" \
+    --name-first=cyber \
+    --name-last=GAU \
+    --password="$ADMIN_PASSWORD" \
+    --admin=1
+fi
+
+if ! mysql -N panel -e "SHOW TABLES LIKE 'users';" | grep -q users; then
+  cd "$PANEL_DIR"
   php artisan p:environment:database \
     --host=127.0.0.1 \
     --port=3306 \
@@ -122,7 +145,11 @@ systemctl daemon-reload
 systemctl enable --now pteroq.service
 
 CRON_LINE='* * * * * php /var/www/pterodactyl/artisan schedule:run >> /dev/null 2>&1'
-(crontab -u www-data -l 2>/dev/null | grep -v schedule:run; echo "$CRON_LINE") | crontab -u www-data -
+cron_tmp="$(mktemp)"
+crontab -u www-data -l 2>/dev/null | grep -v schedule:run >"$cron_tmp" || true
+echo "$CRON_LINE" >>"$cron_tmp"
+crontab -u www-data "$cron_tmp"
+rm -f "$cron_tmp"
 
 if ! command -v wings >/dev/null 2>&1; then
   curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64"
@@ -133,7 +160,7 @@ mkdir -p /etc/pterodactyl
 KEY_FILE=/etc/cybergau/panel-keys.env
 if [[ ! -s "$KEY_FILE" ]]; then
   cp /opt/cybergau/deploy/panel-keys.php "$PANEL_DIR/panel-keys.php"
-  (cd "$PANEL_DIR" && php panel-keys.php) | tee "$KEY_FILE"
+  (cd "$PANEL_DIR" && php panel-keys.php) >"$KEY_FILE"
   rm -f "$PANEL_DIR/panel-keys.php"
   chmod 600 "$KEY_FILE"
 fi
@@ -162,7 +189,11 @@ upsert_env PTERODACTYL_CLIENT_KEY "$CLIENT_KEY"
 install -m 600 /etc/cybergau/env /opt/cybergau/.env
 
 AUTH=(-H "Authorization: Bearer ${APP_KEY}" -H "Accept: Application/vnd.pterodactyl.v1+json" -H "Content-Type: application/json")
-BASE="http://127.0.0.1:${PANEL_PORT:-8088}"
+PANEL_HTTP_HOST="${BIND_ADDR:-127.0.0.1}"
+if [[ "$PANEL_HTTP_HOST" == "0.0.0.0" || "$PANEL_HTTP_HOST" == "::" ]]; then
+  PANEL_HTTP_HOST=127.0.0.1
+fi
+BASE="http://${PANEL_HTTP_HOST}:${PANEL_PORT:-8088}"
 
 LOC_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/locations" | jq -r '.data[0].attributes.id // empty')"
 if [[ -z "$LOC_ID" ]]; then
@@ -176,9 +207,28 @@ if [[ -z "$NODE_ID" ]]; then
   NODE_ID="$(curl -sf "${AUTH[@]}" -d "{\"name\":\"cybergau\",\"location_id\":${LOC_ID},\"fqdn\":\"${PANEL_FQDN}\",\"scheme\":\"http\",\"behind_proxy\":false,\"maintenance_mode\":false,\"memory\":${MEM},\"memory_overallocate\":0,\"disk\":${DISK},\"disk_overallocate\":0,\"upload_size\":100,\"daemon_sftp\":2022,\"daemon_listen\":8080}" "$BASE/api/application/nodes" | jq -r '.attributes.id')"
 fi
 
-if [[ ! -f /etc/pterodactyl/config.yml ]]; then
-  curl -sf "${AUTH[@]}" "$BASE/api/application/nodes/${NODE_ID}/configuration" -o /etc/pterodactyl/config.yml
+if [[ ! -f /etc/pterodactyl/config.yml ]] || grep -q '^{' /etc/pterodactyl/config.yml; then
+  curl -sf -H "Authorization: Bearer ${APP_KEY}" -H "Accept: Application/vnd.pterodactyl.v1+json" \
+    "$BASE/api/application/nodes/${NODE_ID}/configuration" -o /etc/pterodactyl/config.yml
+  python3 /opt/cybergau/deploy/wings-config.py /etc/pterodactyl/config.yml /etc/pterodactyl/config.yml
   chmod 600 /etc/pterodactyl/config.yml
+fi
+
+if ! grep -q '^docker:' /etc/pterodactyl/config.yml; then
+  cat >>/etc/pterodactyl/config.yml <<'EOF'
+docker:
+  network:
+    interface: 172.21.0.1
+    name: pterodactyl0
+    network_mode: pterodactyl0
+    is_internal: false
+    enable_icc: true
+    network_mtu: 1450
+    interfaces:
+      v4:
+        subnet: 172.21.0.0/16
+        gateway: 172.21.0.1
+EOF
 fi
 
 cat > /etc/systemd/system/wings.service <<'EOF'
@@ -202,6 +252,7 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
+systemctl reset-failed wings || true
 systemctl enable --now wings
 
 POOL="${POOL_SIZE:-1}"
@@ -217,10 +268,7 @@ if [[ "$NEED" -gt 0 ]]; then
     if [[ -z "$NEST_ID" ]]; then
       NEST_ID="$(curl -sf "${AUTH[@]}" -d '{"name":"cyberGAU","description":"CS2 pool"}' "$BASE/api/application/nests" | jq -r '.attributes.id')"
     fi
-    EGG_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs" | jq -r '.data[] | select(.attributes.name=="Counter-Strike 2") | .attributes.id' | head -1)"
-    if [[ -z "$EGG_ID" ]]; then
-      EGG_ID="$(cd "$PANEL_DIR" && NEST_ID="$NEST_ID" EGG_PATH="$EGG_JSON" php /opt/cybergau/deploy/import-egg.php || true)"
-    fi
+    EGG_ID="$(cd "$PANEL_DIR" && PANEL_DIR="$PANEL_DIR" NEST_ID="$NEST_ID" EGG_PATH="$EGG_JSON" php /opt/cybergau/deploy/import-egg.php || true)"
     if [[ -n "$EGG_ID" ]]; then
       RCON_PASSWORD="$(openssl rand -hex 8)"
       for i in $(seq 1 "$NEED"); do
@@ -230,7 +278,9 @@ if [[ "$NEED" -gt 0 ]]; then
         EGG_BODY="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs/${EGG_ID}?include=variables")"
         STARTUP="$(echo "$EGG_BODY" | jq -r '.attributes.startup')"
         IMAGE="$(echo "$EGG_BODY" | jq -r '.attributes.docker_image // (.attributes.docker_images | to_entries[0].value) // "ghcr.io/ptero-eggs/steamcmd:sniper"')"
-        ENV_JSON="$(jq -nc --arg rcon "$RCON_PASSWORD" --arg gslt "${STEAM_GSLT:-}" '{SRCDS_MAP:"de_dust2",SRCDS_APPID:"730",MAX_PLAYERS:"16",AUTO_UPDATE:"1",TV_PORT:"27020",STEAM_GSLT:$gslt,VAC_ENABLED:"0",RCON_ENABLED:"0",SERVER_NAME:"cyberGAU",SERVER_PASSWORD:"",RCON_PASSWORD:$rcon,GAME_MODE:"1",GAME_TYPE:"0"}')"
+        SKIN_API="${PUBLIC_WEB_URL:-http://10.77.0.1:3000}"
+        SKIN_API="${SKIN_API%/}/backend"
+        ENV_JSON="$(jq -nc --arg rcon "$RCON_PASSWORD" --arg gslt "${STEAM_GSLT:-}" --arg skin "$SKIN_API" '{SRCDS_MAP:"de_dust2",SRCDS_APPID:"730",MAX_PLAYERS:"16",AUTO_UPDATE:"1",TV_PORT:"27020",STEAM_GSLT:$gslt,VAC_ENABLED:"0",RCON_ENABLED:"0",SERVER_NAME:"cyberGAU",SERVER_PASSWORD:"",RCON_PASSWORD:$rcon,GAME_MODE:"1",GAME_TYPE:"0",SKIN_API_BASE:$skin,SKIN_PLUGIN_URL:($skin + "/skins/plugin.zip")}')"
         curl -sf "${AUTH[@]}" -d "{\"name\":\"cybergau-$((EXISTING + i))\",\"user\":${USER_ID},\"egg\":${EGG_ID},\"docker_image\":\"${IMAGE}\",\"startup\":$(echo "$STARTUP" | jq -Rs .),\"environment\":${ENV_JSON},\"limits\":{\"memory\":${CS2_MEMORY_MB:-2048},\"swap\":0,\"disk\":${CS2_DISK_MB:-40960},\"io\":500,\"cpu\":${CS2_CPU:-200}},\"feature_limits\":{\"databases\":0,\"allocations\":0,\"backups\":0},\"allocation\":{\"default\":${ALLOC}},\"start_on_completion\":false}" \
           "$BASE/api/application/servers" >/dev/null || echo "Слот cybergau-$((EXISTING + i)) не создан"
       done

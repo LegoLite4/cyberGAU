@@ -13,34 +13,168 @@
   "file_denylist": [],
   "startup": "LD_LIBRARY_PATH=\"$HOME/game/bin/linuxsteamrt64:$LD_LIBRARY_PATH\" ./game/bin/linuxsteamrt64/cs2 -dedicated $( [ \"$VAC_ENABLED\" == \"1\" ] || printf %s ' -insecure' ) -ip 0.0.0.0 -port {{SERVER_PORT}} -tv_port {{TV_PORT}} -maxplayers {{MAX_PLAYERS}} $( [ \"$RCON_ENABLED\" == \"0\" ] || printf %s ' -usercon' ) +game_mode {{GAME_MODE}} +game_type {{GAME_TYPE}} +map {{SRCDS_MAP}} +hostname \"{{SERVER_NAME}}\" +sv_password \"{{SERVER_PASSWORD}}\" +rcon_password \"{{RCON_PASSWORD}}\" +sv_setsteamaccount {{STEAM_GSLT}}",
   "config": {
-    "files": {},
-    "startup": {
-      "done": "Host activate",
-      "userInteraction": []
-    },
-    "logs": {},
+    "files": "{}",
+    "startup": "{\"done\":\"Host activate\",\"userInteraction\":[]}",
+    "logs": "{}",
     "stop": "quit"
   },
   "scripts": {
     "installation": {
       "container": "ghcr.io/ptero-eggs/installers:debian",
       "entrypoint": "bash",
-      "script": "#!/bin/bash\nif [[ \"${STEAM_USER}\" == \"\" ]]; then\n  STEAM_USER=anonymous\n  STEAM_PASS=\"\"\n  STEAM_AUTH=\"\"\nfi\ncd /tmp\nmkdir -p /mnt/server/steamcmd\ncurl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\ntar -xzf steamcmd.tar.gz -C /mnt/server/steamcmd\nmkdir -p /mnt/server/steamapps\ncd /mnt/server/steamcmd\nchown -R root:root /mnt\nexport HOME=/mnt/server\n./steamcmd.sh +force_install_dir /mnt/server +login ${STEAM_USER} ${STEAM_PASS} ${STEAM_AUTH} +app_update ${SRCDS_APPID} validate +quit\nmkdir -p /mnt/server/.steam/sdk32 /mnt/server/.steam/sdk64\ncp -v linux32/steamclient.so /mnt/server/.steam/sdk32/steamclient.so\ncp -v linux64/steamclient.so /mnt/server/.steam/sdk64/steamclient.so\necho \"Installation completed\"\n"
+      "script": "#!/bin/bash\r\nset -euo pipefail\r\nif [[ \"${STEAM_USER:-}\" == \"\" ]]; then\r\n  STEAM_USER=anonymous\r\n  STEAM_PASS=\"\"\r\n  STEAM_AUTH=\"\"\r\nfi\r\ncd /tmp\r\nmkdir -p /mnt/server/steamcmd\r\ncurl -fsSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\r\ntar -xzf steamcmd.tar.gz -C /mnt/server/steamcmd\r\nmkdir -p /mnt/server/steamapps\r\ncd /mnt/server/steamcmd\r\nchown -R root:root /mnt\r\nexport HOME=/mnt/server\r\n./steamcmd.sh +force_install_dir /mnt/server +login ${STEAM_USER} ${STEAM_PASS} ${STEAM_AUTH} +app_update ${SRCDS_APPID} validate +quit\r\nmkdir -p /mnt/server/.steam/sdk32 /mnt/server/.steam/sdk64\r\ncp -v linux32/steamclient.so /mnt/server/.steam/sdk32/steamclient.so\r\ncp -v linux64/steamclient.so /mnt/server/.steam/sdk64/steamclient.so\r\n\r\nCSGO=/mnt/server/game/csgo\r\nmkdir -p \"$CSGO\"\r\nif ! command -v unzip >/dev/null 2>&1; then\r\n  apt-get update\r\n  apt-get install -y unzip\r\nfi\r\ncurl -fsSL -o /tmp/metamod.tar.gz \"https://github.com/alliedmodders/metamod-source/releases/download/1.12.0.1227/mmsource-1.12.0-git1227-linux.tar.gz\"\r\ntar -xzf /tmp/metamod.tar.gz -C \"$CSGO\"\r\ncurl -fsSL -o /tmp/css.zip \"https://github.com/roflmuffin/CounterStrikeSharp/releases/download/v1.0.375/counterstrikesharp-with-runtime-linux-1.0.375.zip\"\r\nunzip -o /tmp/css.zip -d \"$CSGO\"\r\nmkdir -p \"$CSGO/addons/counterstrikesharp/configs\"\r\ncat > \"$CSGO/addons/counterstrikesharp/configs/core.json\" <<'EOF'\r\n{\r\n  \"PublicChatTrigger\": [\"!\"],\r\n  \"SilentChatTrigger\": [\"/\"],\r\n  \"FollowCS2ServerGuidelines\": false,\r\n  \"PluginHotReloadEnabled\": false,\r\n  \"PluginAutoLoadEnabled\": true,\r\n  \"PluginResolveNugetPackages\": false,\r\n  \"ServerLanguage\": \"en\",\r\n  \"UnlockConCommands\": true,\r\n  \"UnlockConVars\": true,\r\n  \"AutoUpdateEnabled\": false,\r\n  \"AutoUpdateURL\": \"http://gamedata.cssharp.dev\",\r\n  \"MaximumFrameTasksExecutedPerTick\": 1024\r\n}\r\nEOF\r\nGAMEINFO=\"$CSGO/gameinfo.gi\"\r\nif [[ -f \"$GAMEINFO\" ]] && ! grep -q \"addons/metamod\" \"$GAMEINFO\"; then\r\n  awk 'BEGIN{done=0} { if (done==0 && $0 ~ /Game[[:space:]]+csgo[[:space:]]*$/) { print \"\\t\\t\\tGame\\tcsgo/addons/metamod\"; done=1 } print }' \"$GAMEINFO\" > \"$GAMEINFO.new\"\r\n  mv \"$GAMEINFO.new\" \"$GAMEINFO\"\r\nfi\r\nSKIN_PLUGIN_URL=\"${SKIN_PLUGIN_URL:-http://10.77.0.1:3000/backend/skins/plugin.zip}\"\r\nSKIN_API_BASE=\"${SKIN_API_BASE:-http://10.77.0.1:3000/backend}\"\r\nmkdir -p \"$CSGO/addons/counterstrikesharp/plugins\"\r\ncurl -fsSL -o /tmp/cybergau-skins.zip \"$SKIN_PLUGIN_URL\"\r\nunzip -o /tmp/cybergau-skins.zip -d \"$CSGO/addons/counterstrikesharp/plugins\"\r\nprintf '%s\\n' \"{\\\"ApiBase\\\":\\\"${SKIN_API_BASE}\\\"}\" > \"$CSGO/addons/counterstrikesharp/plugins/CybergauSkins/config.json\"\r\ntest -f \"$CSGO/addons/counterstrikesharp/plugins/CybergauSkins/CybergauSkins.dll\"\r\necho \"cyberGAU skinchanger installed\"\r\n"
     }
   },
   "variables": [
-    {"name": "Map", "description": "Start map", "env_variable": "SRCDS_MAP", "default_value": "de_dust2", "user_viewable": true, "user_editable": true, "rules": "required|string", "field_type": "text"},
-    {"name": "AppID", "description": "Steam app id", "env_variable": "SRCDS_APPID", "default_value": "730", "user_viewable": false, "user_editable": false, "rules": "required|string|in:730", "field_type": "text"},
-    {"name": "Max Players", "description": "Slots", "env_variable": "MAX_PLAYERS", "default_value": "12", "user_viewable": true, "user_editable": true, "rules": "required|numeric|between:1,64", "field_type": "text"},
-    {"name": "Auto Update", "description": "Update on boot", "env_variable": "AUTO_UPDATE", "default_value": "1", "user_viewable": true, "user_editable": true, "rules": "required|boolean", "field_type": "text"},
-    {"name": "SourceTV Port", "description": "GOTV port", "env_variable": "TV_PORT", "default_value": "27020", "user_viewable": true, "user_editable": false, "rules": "required|integer|between:1025,65535", "field_type": "text"},
-    {"name": "Steam Token", "description": "GSLT, optional on LAN", "env_variable": "STEAM_GSLT", "default_value": "", "user_viewable": true, "user_editable": true, "rules": "nullable|alpha_num|size:32", "field_type": "text"},
-    {"name": "VAC", "description": "Enable VAC", "env_variable": "VAC_ENABLED", "default_value": "0", "user_viewable": true, "user_editable": true, "rules": "required|boolean", "field_type": "text"},
-    {"name": "RCON Enabled", "description": "Enable rcon", "env_variable": "RCON_ENABLED", "default_value": "0", "user_viewable": true, "user_editable": true, "rules": "required|boolean", "field_type": "text"},
-    {"name": "Server Name", "description": "Hostname", "env_variable": "SERVER_NAME", "default_value": "cyberGAU", "user_viewable": true, "user_editable": true, "rules": "required|string|max:64", "field_type": "text"},
-    {"name": "Server Password", "description": "Join password", "env_variable": "SERVER_PASSWORD", "default_value": "", "user_viewable": true, "user_editable": true, "rules": "nullable|alpha_dash|max:30", "field_type": "text"},
-    {"name": "RCON Password", "description": "RCON password", "env_variable": "RCON_PASSWORD", "default_value": "cybergau", "user_viewable": true, "user_editable": true, "rules": "required|alpha_dash|between:1,30", "field_type": "text"},
-    {"name": "Game Mode", "description": "game_mode", "env_variable": "GAME_MODE", "default_value": "1", "user_viewable": true, "user_editable": true, "rules": "required|string", "field_type": "text"},
-    {"name": "Game Type", "description": "game_type", "env_variable": "GAME_TYPE", "default_value": "0", "user_viewable": true, "user_editable": true, "rules": "required|string", "field_type": "text"}
+    {
+      "name": "Map",
+      "description": "Start map",
+      "env_variable": "SRCDS_MAP",
+      "default_value": "de_dust2",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string",
+      "field_type": "text"
+    },
+    {
+      "name": "AppID",
+      "description": "Steam app id",
+      "env_variable": "SRCDS_APPID",
+      "default_value": "730",
+      "user_viewable": false,
+      "user_editable": false,
+      "rules": "required|string|in:730",
+      "field_type": "text"
+    },
+    {
+      "name": "Max Players",
+      "description": "Slots",
+      "env_variable": "MAX_PLAYERS",
+      "default_value": "12",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|numeric|between:1,64",
+      "field_type": "text"
+    },
+    {
+      "name": "Auto Update",
+      "description": "Update on boot",
+      "env_variable": "AUTO_UPDATE",
+      "default_value": "1",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|boolean",
+      "field_type": "text"
+    },
+    {
+      "name": "SourceTV Port",
+      "description": "GOTV port",
+      "env_variable": "TV_PORT",
+      "default_value": "27020",
+      "user_viewable": true,
+      "user_editable": false,
+      "rules": "required|integer|between:1025,65535",
+      "field_type": "text"
+    },
+    {
+      "name": "Steam Token",
+      "description": "GSLT, optional on LAN",
+      "env_variable": "STEAM_GSLT",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|alpha_num|size:32",
+      "field_type": "text"
+    },
+    {
+      "name": "VAC",
+      "description": "Enable VAC",
+      "env_variable": "VAC_ENABLED",
+      "default_value": "0",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|boolean",
+      "field_type": "text"
+    },
+    {
+      "name": "RCON Enabled",
+      "description": "Enable rcon",
+      "env_variable": "RCON_ENABLED",
+      "default_value": "0",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|boolean",
+      "field_type": "text"
+    },
+    {
+      "name": "Server Name",
+      "description": "Hostname",
+      "env_variable": "SERVER_NAME",
+      "default_value": "cyberGAU",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:64",
+      "field_type": "text"
+    },
+    {
+      "name": "Server Password",
+      "description": "Join password",
+      "env_variable": "SERVER_PASSWORD",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|alpha_dash|max:30",
+      "field_type": "text"
+    },
+    {
+      "name": "RCON Password",
+      "description": "RCON password",
+      "env_variable": "RCON_PASSWORD",
+      "default_value": "cybergau",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|alpha_dash|between:1,30",
+      "field_type": "text"
+    },
+    {
+      "name": "Game Mode",
+      "description": "game_mode",
+      "env_variable": "GAME_MODE",
+      "default_value": "1",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Game Type",
+      "description": "game_type",
+      "env_variable": "GAME_TYPE",
+      "default_value": "0",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Skin API",
+      "description": "cyberGAU API base for the skinchanger",
+      "env_variable": "SKIN_API_BASE",
+      "default_value": "http://10.77.0.1:3000/backend",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:200",
+      "field_type": "text"
+    },
+    {
+      "name": "Skin plugin",
+      "description": "Zip with the cyberGAU skinchanger",
+      "env_variable": "SKIN_PLUGIN_URL",
+      "default_value": "http://10.77.0.1:3000/backend/skins/plugin.zip",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:200",
+      "field_type": "text"
+    }
   ]
 }

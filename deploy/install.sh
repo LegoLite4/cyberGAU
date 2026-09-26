@@ -26,6 +26,8 @@ if [[ "$CYBERGAU_ACCESS" != "wireguard" && "$CYBERGAU_ACCESS" != "lan" ]]; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+export HOME="${HOME:-/root}"
+export COMPOSER_HOME="${COMPOSER_HOME:-/root/.composer}"
 apt-get update
 apt-get install -y ca-certificates curl git rsync docker.io qemu-guest-agent
 if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
@@ -35,6 +37,27 @@ else
 fi
 systemctl enable --now docker
 systemctl enable --now qemu-guest-agent || true
+
+# Путь до интернета на этой сети не пропускает кадры 1500 байт.
+# Контейнеры тогда зависают на больших загрузках (npm, Steam).
+if ! ping -M do -s 1472 -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
+  mkdir -p /etc/docker
+  if [[ ! -f /etc/docker/daemon.json ]]; then
+    printf '%s\n' '{ "mtu": 1450 }' >/etc/docker/daemon.json
+    systemctl restart docker
+  fi
+  iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null \
+    || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+fi
+
+# Некоторые роутеры анонсируют IPv6, но не выпускают его в интернет.
+# Docker Hub тогда зависает на AAAA-записях. Если реестр по IPv6 недоступен, выключаем IPv6.
+hub_v6="$(timeout 8 curl -6 -sS -o /dev/null --max-time 5 -w '%{http_code}' https://registry-1.docker.io/v2/ || true)"
+if [[ "$hub_v6" != "200" && "$hub_v6" != "401" ]]; then
+  sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
+  sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null
+  printf '%s\n' 'net.ipv6.conf.all.disable_ipv6=1' 'net.ipv6.conf.default.disable_ipv6=1' >/etc/sysctl.d/99-cybergau-ipv6.conf
+fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p /opt/cybergau
