@@ -122,6 +122,15 @@ ln -sfn /etc/nginx/sites-available/pterodactyl.conf /etc/nginx/sites-enabled/pte
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl enable --now php8.3-fpm redis-server mariadb nginx
+if [[ "${CYBERGAU_ACCESS:-lan}" == "wireguard" ]]; then
+  mkdir -p /etc/systemd/system/nginx.service.d
+  cat > /etc/systemd/system/nginx.service.d/after-wireguard.conf <<'EOF'
+[Unit]
+After=wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+EOF
+  systemctl daemon-reload
+fi
 systemctl reload nginx
 
 cat > /etc/systemd/system/pteroq.service <<'EOF'
@@ -281,7 +290,7 @@ if [[ "$NEED" -gt 0 ]]; then
         SKIN_API="${PUBLIC_WEB_URL:-http://10.77.0.1:3000}"
         SKIN_API="${SKIN_API%/}/backend"
         ENV_JSON="$(jq -nc --arg rcon "$RCON_PASSWORD" --arg gslt "${STEAM_GSLT:-}" --arg skin "$SKIN_API" '{SRCDS_MAP:"de_dust2",SRCDS_APPID:"730",MAX_PLAYERS:"16",AUTO_UPDATE:"1",TV_PORT:"27020",STEAM_GSLT:$gslt,VAC_ENABLED:"0",RCON_ENABLED:"0",SERVER_NAME:"cyberGAU",SERVER_PASSWORD:"",RCON_PASSWORD:$rcon,GAME_MODE:"1",GAME_TYPE:"0",SKIN_API_BASE:$skin,SKIN_PLUGIN_URL:($skin + "/skins/plugin.zip")}')"
-        curl -sf "${AUTH[@]}" -d "{\"name\":\"cybergau-$((EXISTING + i))\",\"user\":${USER_ID},\"egg\":${EGG_ID},\"docker_image\":\"${IMAGE}\",\"startup\":$(echo "$STARTUP" | jq -Rs .),\"environment\":${ENV_JSON},\"limits\":{\"memory\":${CS2_MEMORY_MB:-2048},\"swap\":0,\"disk\":${CS2_DISK_MB:-40960},\"io\":500,\"cpu\":${CS2_CPU:-200}},\"feature_limits\":{\"databases\":0,\"allocations\":0,\"backups\":0},\"allocation\":{\"default\":${ALLOC}},\"start_on_completion\":false}" \
+        curl -sf "${AUTH[@]}" -d "{\"name\":\"cybergau-$((EXISTING + i))\",\"user\":${USER_ID},\"egg\":${EGG_ID},\"docker_image\":\"${IMAGE}\",\"startup\":$(echo "$STARTUP" | jq -Rs .),\"environment\":${ENV_JSON},\"limits\":{\"memory\":${CS2_MEMORY_MB:-2048},\"swap\":0,\"disk\":${CS2_DISK_MB:-90000},\"io\":500,\"cpu\":${CS2_CPU:-200}},\"feature_limits\":{\"databases\":0,\"allocations\":0,\"backups\":0},\"allocation\":{\"default\":${ALLOC}},\"start_on_completion\":false}" \
           "$BASE/api/application/servers" >/dev/null || echo "Слот cybergau-$((EXISTING + i)) не создан"
       done
     else

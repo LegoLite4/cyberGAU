@@ -24,7 +24,7 @@ if ! command -v unzip >/dev/null 2>&1; then
   apt-get update
   apt-get install -y unzip
 fi
-curl -fsSL -o /tmp/metamod.tar.gz "https://github.com/alliedmodders/metamod-source/releases/download/1.12.0.1227/mmsource-1.12.0-git1227-linux.tar.gz"
+curl -fsSL -o /tmp/metamod.tar.gz "https://mms.alliedmods.net/mmsdrop/2.0/mmsource-2.0.0-git1472-linux.tar.gz"
 tar -xzf /tmp/metamod.tar.gz -C "$CSGO"
 curl -fsSL -o /tmp/css.zip "https://github.com/roflmuffin/CounterStrikeSharp/releases/download/v1.0.375/counterstrikesharp-with-runtime-linux-1.0.375.zip"
 unzip -o /tmp/css.zip -d "$CSGO"
