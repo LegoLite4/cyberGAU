@@ -85,7 +85,7 @@ export default function MatchesPage() {
           </div>
           {mine.length === 0 ? <p className="empty">Сейчас вы ни в одном живом лобби.</p> : null}
           <div className="stack">
-            {mine.map((lobby) => <MatchRow key={lobby.id} lobby={lobby} />)}
+            {mine.map((lobby, index) => <MatchRow key={lobby.id} lobby={lobby} index={index} />)}
           </div>
         </section>
       ) : null}
@@ -94,7 +94,7 @@ export default function MatchesPage() {
       </div>
       {lobbies.length === 0 ? <p className="empty">Сейчас нет открытых лобби. Создайте первое.</p> : null}
       <div className="stack">
-        {lobbies.map((lobby) => <MatchRow key={lobby.id} lobby={lobby} />)}
+        {lobbies.map((lobby, index) => <MatchRow key={lobby.id} lobby={lobby} index={index} />)}
       </div>
     </>
   );

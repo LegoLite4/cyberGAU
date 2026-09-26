@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { Press, Rise } from "../components/Motion";
 import { api, type CatalogWeapon, type SkinItem, type SkinItems, type User } from "../../lib/api";
 
 const WEARS = [
@@ -140,9 +141,11 @@ export default function SkinsPage() {
           <h1>Выбрать скины</h1>
           <p className="lead">Выберите любой скин из справочника и подтвердите набор. На сервере cyberGAU он надевается на ваш Steam.</p>
         </div>
-        <button className="btn primary" disabled={pending || !user.steamId} onClick={save}>
-          {pending ? "Сохраняем..." : "Сохранить"}
-        </button>
+        <Press>
+          <button className="btn primary" disabled={pending || !user.steamId} onClick={save}>
+            {pending ? "Сохраняем..." : "Сохранить"}
+          </button>
+        </Press>
       </section>
       {user.steamId ? null : (
         <p className="error">Сначала привяжите Steam — это нужно для скинченджера. <a href="/backend/auth/steam">Привязать Steam — нужно для скинченджера</a></p>
@@ -183,6 +186,7 @@ export default function SkinsPage() {
             </div>
             <button className="btn" type="button" disabled={!selected || !chosen} onClick={() => selected && writeSlot(selected, null)}>Сбросить</button>
           </div>
+          <Rise key={selectedId}>
           <div className="skin-grid">
             {visibleSkins.map((skin) => {
               const active = chosen?.paint === skin.paint;
@@ -194,6 +198,7 @@ export default function SkinsPage() {
               );
             })}
           </div>
+          </Rise>
           {visibleSkins.length === 0 ? <p className="empty">Ничего не найдено.</p> : null}
         </section>
       </div>

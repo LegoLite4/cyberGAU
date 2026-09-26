@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { api, statusLabel, type ModeCard } from "../../lib/api";
 
 const LIVE_ORDER = [
@@ -43,6 +44,7 @@ export default function ModesPage() {
   const [error, setError] = useState("");
   const [pending, setPending] = useState("");
   const [ready, setReady] = useState(false);
+  const reduce = useReducedMotion();
 
   function load() {
     api.modes()
@@ -96,17 +98,29 @@ export default function ModesPage() {
           const mode = byId.get(item.id);
           if (!mode) {
             return (
-              <article key={item.id} className="mode-tile">
+              <motion.article
+                key={item.id}
+                className="mode-tile"
+                initial={reduce ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: reduce ? 0 : 0.22 }}
+              >
                 <span className="pill">{ready ? "Нет данных" : "Загрузка"}</span>
                 <h3>{item.title}</h3>
                 <p className="meta">{ready ? "Сервер режимов не ответил" : "Читаем слот в сети"}</p>
                 <button className="btn primary" disabled>Играть</button>
-              </article>
+              </motion.article>
             );
           }
           const live = mode.status === "live";
           return (
-            <article key={mode.id} className="mode-tile">
+            <motion.article
+              key={mode.id}
+              className="mode-tile"
+              initial={reduce ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: reduce ? 0 : 0.22 }}
+            >
               <div className="meta">
                 <span className={live ? "pill live" : "pill"}>{statusLabel(mode.status)}</span>
                 <span>{mode.map}</span>
@@ -118,7 +132,7 @@ export default function ModesPage() {
               <button className="btn primary" disabled={pending === mode.id} onClick={() => toggle(mode)}>
                 {live ? "Остановить" : "Играть"}
               </button>
-            </article>
+            </motion.article>
           );
         })}
         {UNAVAILABLE.map((title) => (

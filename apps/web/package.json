@@ -7,9 +7,12 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "motion": "^13.4.4",
     "next": "^15.5.4",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
