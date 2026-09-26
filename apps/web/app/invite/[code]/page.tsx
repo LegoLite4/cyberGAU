@@ -30,7 +30,8 @@ export default function InvitePage() {
   if (!lobby) return <p className="lead">{error || "Ищем приглашение..."}</p>;
 
   return (
-    <section className="panel" style={{ maxWidth: 560 }}>
+    <section className="panel auth" style={{ padding: 22 }}>
+      <p className="kicker">Приглашение</p>
       <h1>{lobby.title}</h1>
       <p className="lead">{lobby.owner.personaName} зовёт в лобби {lobby.format} на {lobby.map}.</p>
       {lobby.hasPassword ? <input className="field" placeholder="Пароль" value={password} onChange={(event) => setPassword(event.target.value)} /> : null}

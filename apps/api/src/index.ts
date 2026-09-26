@@ -9,7 +9,7 @@ import { FORMATS, MAPS, isFormat } from "./catalog";
 import { prisma, publicWebUrl } from "./db";
 import { ensureMockSlot, listLobbies, listModes, newInviteCode, startLobby, startMode, stopLobby, stopMode, toLobbyDto } from "./lobbies";
 import { syncPanelServers } from "./pterodactyl";
-import { loadoutForSteam, pluginZipPath, syncSteamInventory } from "./skins";
+import { listCatalogWeapons, loadoutForSteam, loadoutForUser, pluginZipPath, saveLoadout, syncSteamInventory, type SkinItems } from "./skins";
 
 const app = Fastify({ logger: true });
 
@@ -313,6 +313,69 @@ app.post("/lobbies/:id/messages", async (request, reply) => {
   } catch (error) {
     reply.code(statusOf(error));
     return { error: error instanceof Error ? error.message : "Сообщение не отправлено" };
+  }
+});
+
+app.get("/skins/catalog", async (request, reply) => {
+  try {
+    await requireUser(request);
+    return { weapons: await listCatalogWeapons() };
+  } catch (error) {
+    reply.code(statusOf(error));
+    return { error: error instanceof Error ? error.message : "Справочник недоступен" };
+  }
+});
+
+app.get("/skins/mine", async (request, reply) => {
+  try {
+    const user = await requireUser(request);
+    return { items: await loadoutForUser(user.id) };
+  } catch (error) {
+    reply.code(statusOf(error));
+    return { error: error instanceof Error ? error.message : "Набор недоступен" };
+  }
+});
+
+const skinItemSchema = z.object({
+  paint: z.number().int().nonnegative(),
+  wear: z.number().min(0).max(1),
+  seed: z.number().int().min(0).max(1000),
+  defindex: z.number().int().nonnegative().optional(),
+  classname: z.string().min(1).max(64),
+});
+
+const loadoutSchema = z.object({
+  weapons: z.record(z.string(), skinItemSchema).default({}),
+  knife: skinItemSchema.nullable().optional(),
+  gloves: skinItemSchema.nullable().optional(),
+});
+
+app.put("/skins/loadout", async (request, reply) => {
+  try {
+    const user = await requireUser(request);
+    if (!user.steamId) throw new Error("Сначала привяжите Steam — это нужно для скинченджера");
+    const parsed = loadoutSchema.parse(request.body);
+    const fill = (item: { paint: number; wear: number; seed: number; defindex?: number; classname: string }) => ({
+      paint: item.paint,
+      wear: item.wear,
+      seed: item.seed,
+      defindex: item.defindex ?? 0,
+      classname: item.classname,
+    });
+    const items: SkinItems = {
+      weapons: Object.fromEntries(Object.entries(parsed.weapons).map(([key, item]) => [key, fill(item)])),
+      knife: parsed.knife ? fill(parsed.knife) : null,
+      gloves: parsed.gloves ? fill(parsed.gloves) : null,
+    };
+    const saved = await saveLoadout(user.id, user.steamId, items);
+    const fresh = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    return { user: await toPublicUser(fresh), items: saved };
+  } catch (error) {
+    reply.code(statusOf(error));
+    const message = error instanceof z.ZodError
+      ? "Проверьте выбранные скины и износ."
+      : error instanceof Error ? error.message : "Набор не сохранён";
+    return { error: message };
   }
 });
 

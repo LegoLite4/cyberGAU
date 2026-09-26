@@ -1,6 +1,7 @@
 import { env, prisma } from "./db";
 
 const CATALOG_URL = "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json";
+const RU_CATALOG_URL = "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/ru/skins.json";
 const PRIVATE_INVENTORY = "Инвентарь Steam закрыт. Откройте его в настройках приватности Steam, иначе скинченджер не видит скины.";
 
 const WEAR: Record<string, number> = {
@@ -32,14 +33,47 @@ type CatalogEntry = {
   kind: "weapon" | "knife" | "gloves";
 };
 
-type CatalogSkin = {
-  name?: string;
-  paint_index?: string;
-  weapon?: { id?: string; weapon_id?: number };
-  category?: { id?: string };
+export type CatalogSkinView = {
+  name: string;
+  image: string;
+  paint: number;
 };
 
-let catalog: Map<string, CatalogEntry> | null = null;
+export type CatalogWeapon = {
+  classname: string;
+  name: string;
+  kind: CatalogEntry["kind"];
+  group: string;
+  skins: CatalogSkinView[];
+};
+
+type CatalogSkin = {
+  name?: string;
+  image?: string;
+  paint_index?: string;
+  weapon?: { id?: string; weapon_id?: number; name?: string };
+  category?: { id?: string; name?: string };
+};
+
+type StoredCatalog = {
+  byName: Map<string, CatalogEntry>;
+  byPaint: Map<string, CatalogEntry>;
+  weapons: CatalogWeapon[];
+};
+
+const GROUP_LABEL: Record<string, string> = {
+  sfui_invpanel_filter_melee: "Ножи",
+  sfui_invpanel_filter_gloves: "Перчатки",
+  csgo_inventory_weapon_category_rifles: "Винтовки",
+  csgo_inventory_weapon_category_smgs: "Пистолеты-пулемёты",
+  csgo_inventory_weapon_category_pistols: "Пистолеты",
+  csgo_inventory_weapon_category_heavy: "Тяжёлое",
+  loadoutslot_equipment: "Снаряжение",
+};
+
+const GROUP_ORDER = Object.keys(GROUP_LABEL);
+
+let storedCatalog: StoredCatalog | null = null;
 
 function catalogKey(name: string): string {
   return name.replace(/\s+/g, " ").trim().toLowerCase();
@@ -55,23 +89,85 @@ function kindOf(entry: CatalogSkin): CatalogEntry["kind"] | null {
   return null;
 }
 
-export async function loadCatalog(): Promise<Map<string, CatalogEntry>> {
-  if (catalog) return catalog;
-  const response = await fetch(CATALOG_URL, { headers: { "user-agent": "cyberGAU" } });
+function paintKey(classname: string, paint: number): string {
+  return `${classname}:${paint}`;
+}
+
+function groupOf(categoryId: string): string {
+  return GROUP_LABEL[categoryId] ?? "Другое";
+}
+
+async function fetchCatalogRows(url: string): Promise<CatalogSkin[] | null> {
+  const response = await fetch(url, { headers: { "user-agent": "cyberGAU" } });
+  if (response.status === 404) return null;
   if (!response.ok) throw new Error("Не удалось скачать справочник скинов");
-  const rows = (await response.json()) as CatalogSkin[];
-  const map = new Map<string, CatalogEntry>();
+  return (await response.json()) as CatalogSkin[];
+}
+
+function usableClassname(kind: CatalogEntry["kind"], classname: string): boolean {
+  if (classname.startsWith("sfui_")) return false;
+  if (kind === "gloves") return true;
+  return classname.startsWith("weapon_");
+}
+
+async function ensureCatalog(): Promise<StoredCatalog> {
+  if (storedCatalog) return storedCatalog;
+  const russian = await fetchCatalogRows(RU_CATALOG_URL);
+  const rows = russian ?? await fetchCatalogRows(CATALOG_URL);
+  if (!rows) throw new Error("Не удалось скачать справочник скинов");
+  const byName = new Map<string, CatalogEntry>();
+  const byPaint = new Map<string, CatalogEntry>();
+  const buckets = new Map<string, CatalogWeapon & { order: number; seen: Set<number> }>();
   for (const row of rows) {
     const kind = kindOf(row);
     const paint = Number(row.paint_index);
     const defindex = row.weapon?.weapon_id;
     const classname = row.weapon?.id;
     if (!kind || !row.name || !classname || !defindex || !Number.isFinite(paint)) continue;
-    const key = catalogKey(row.name);
-    if (!map.has(key)) map.set(key, { paint, defindex, classname, kind });
+    if (!usableClassname(kind, classname)) continue;
+    const entry: CatalogEntry = { paint, defindex, classname, kind };
+    const nameKey = catalogKey(row.name);
+    if (!byName.has(nameKey)) byName.set(nameKey, entry);
+    const key = paintKey(classname, paint);
+    if (byPaint.has(key)) continue;
+    byPaint.set(key, entry);
+    const categoryId = row.category?.id ?? "";
+    let bucket = buckets.get(classname);
+    if (!bucket) {
+      bucket = {
+        classname,
+        name: row.weapon?.name || classname,
+        kind,
+        group: groupOf(categoryId),
+        order: GROUP_ORDER.indexOf(categoryId),
+        skins: [],
+        seen: new Set<number>(),
+      };
+      buckets.set(classname, bucket);
+    }
+    if (bucket.seen.has(paint)) continue;
+    bucket.seen.add(paint);
+    bucket.skins.push({ name: row.name, image: row.image ?? "", paint });
   }
-  catalog = map;
-  return map;
+  const weapons = [...buckets.values()]
+    .sort((a, b) => (a.order - b.order) || a.name.localeCompare(b.name, "ru"))
+    .map((bucket) => ({
+      classname: bucket.classname,
+      name: bucket.name,
+      kind: bucket.kind,
+      group: bucket.group,
+      skins: bucket.skins.sort((a, b) => a.name.localeCompare(b.name, "ru")),
+    }));
+  storedCatalog = { byName, byPaint, weapons };
+  return storedCatalog;
+}
+
+export async function loadCatalog(): Promise<Map<string, CatalogEntry>> {
+  return (await ensureCatalog()).byName;
+}
+
+export async function listCatalogWeapons(): Promise<CatalogWeapon[]> {
+  return (await ensureCatalog()).weapons;
 }
 
 function splitMarketName(name: string): { key: string; wear: number | null } {
@@ -184,13 +280,64 @@ export async function syncSteamInventory(userId: string, steamId: string): Promi
 
 export async function loadoutForSteam(steamId: string): Promise<SkinItems> {
   const row = await prisma.skinLoadout.findUnique({ where: { steamId } });
-  if (!row || !row.items || typeof row.items !== "object" || Array.isArray(row.items)) return emptyItems();
-  const items = row.items as Partial<SkinItems>;
+  if (!row) return emptyItems();
+  return normalizeItems(row.items);
+}
+
+export async function loadoutForUser(userId: string): Promise<SkinItems> {
+  const row = await prisma.skinLoadout.findUnique({ where: { userId } });
+  if (!row) return emptyItems();
+  return normalizeItems(row.items);
+}
+
+function normalizeItems(value: unknown): SkinItems {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return emptyItems();
+  const items = value as Partial<SkinItems>;
   return {
     weapons: items.weapons ?? {},
     knife: items.knife ?? null,
     gloves: items.gloves ?? null,
   };
+}
+
+function checkedSkin(catalog: StoredCatalog, raw: SkinItem, kind: CatalogEntry["kind"]): SkinItem {
+  if (!raw || typeof raw.classname !== "string") throw new Error("Неизвестный скин");
+  const wear = Number(raw.wear);
+  const seed = Number(raw.seed);
+  const paint = Number(raw.paint);
+  if (!Number.isFinite(wear) || wear < 0 || wear > 1) throw new Error("Некорректный износ");
+  if (!Number.isInteger(seed) || seed < 0 || seed > 1000) throw new Error("Некорректный паттерн");
+  const known = catalog.byPaint.get(paintKey(raw.classname, paint));
+  if (!known || known.kind !== kind) throw new Error("Неизвестный скин");
+  return {
+    paint: known.paint,
+    wear,
+    seed,
+    defindex: known.defindex,
+    classname: known.classname,
+  };
+}
+
+export async function saveLoadout(userId: string, steamId: string, input: SkinItems): Promise<SkinItems> {
+  const catalog = await ensureCatalog();
+  const weapons: Record<string, SkinItem> = {};
+  for (const [classname, raw] of Object.entries(input.weapons ?? {})) {
+    if (raw.classname !== classname) throw new Error("Неизвестный скин");
+    const skin = checkedSkin(catalog, raw, "weapon");
+    weapons[skin.classname] = skin;
+  }
+  if (Object.keys(weapons).length > 40) throw new Error("Слишком много оружия в наборе");
+  const items: SkinItems = {
+    weapons,
+    knife: input.knife ? checkedSkin(catalog, input.knife, "knife") : null,
+    gloves: input.gloves ? checkedSkin(catalog, input.gloves, "gloves") : null,
+  };
+  await prisma.skinLoadout.upsert({
+    where: { userId },
+    update: { steamId, items, error: null, syncedAt: new Date() },
+    create: { userId, steamId, items, error: null },
+  });
+  return items;
 }
 
 export function pluginZipPath(): string {

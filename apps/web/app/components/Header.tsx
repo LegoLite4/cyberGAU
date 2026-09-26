@@ -5,10 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, type User } from "../../lib/api";
 
-const links = [
-  { href: "/", label: "Матчи" },
+const links: Array<{ href: string; label: string; badge?: string; match?: string }> = [
   { href: "/modes", label: "Режимы" },
-  { href: "/profile", label: "Профиль" },
+  { href: "/", label: "Матчи" },
+  { href: "/missions", label: "Миссии", badge: "0/5" },
+  { href: "/pickem", label: "Pick'em" },
+  { href: "/skins", label: "Выбрать скины" },
+  { href: "/leaderboard", label: "Лидерборд" },
 ];
 
 export function Header() {
@@ -33,17 +36,24 @@ export function Header() {
         cyberGAU
       </Link>
       <nav className="nav">
-        {links.map((link) => (
-          <Link key={link.href} href={link.href} className={pathname === link.href ? "active" : ""}>
-            {link.label}
-          </Link>
-        ))}
+        {links.map((link) => {
+          const match = link.match || link.href;
+          const active = match === "/" ? pathname === "/" : pathname === match;
+          return (
+            <Link key={link.href} href={link.href} className={active ? "active" : ""}>
+              {link.label}
+              {link.badge ? <span className="badge">{link.badge}</span> : null}
+            </Link>
+          );
+        })}
       </nav>
       <div className="userbox">
         {user ? (
           <>
-            {user.avatarUrl ? <img className="avatar" src={user.avatarUrl} alt="" /> : <span className="avatar" />}
-            <span>{user.personaName}</span>
+            <Link href="/profile" className="userbox">
+              {user.avatarUrl ? <img className="avatar" src={user.avatarUrl} alt="" /> : <span className="avatar" />}
+              <span>{user.personaName}</span>
+            </Link>
             <button className="btn" onClick={logout}>Выйти</button>
           </>
         ) : (

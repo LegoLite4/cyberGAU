@@ -35,6 +35,28 @@ export type Lobby = {
   endedAt: string | null;
 };
 
+export type SkinItem = {
+  paint: number;
+  wear: number;
+  seed: number;
+  defindex: number;
+  classname: string;
+};
+
+export type SkinItems = {
+  weapons: Record<string, SkinItem>;
+  knife: SkinItem | null;
+  gloves: SkinItem | null;
+};
+
+export type CatalogWeapon = {
+  classname: string;
+  name: string;
+  kind: "weapon" | "knife" | "gloves";
+  group: string;
+  skins: Array<{ name: string; image: string; paint: number }>;
+};
+
 export type ModeCard = {
   id: string;
   title: string;
@@ -75,6 +97,10 @@ export const api = {
   login: (username: string, password: string) =>
     request<{ user: User }>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   syncSkins: () => request<{ user: User }>("/skins/sync", { method: "POST" }),
+  skinCatalog: () => request<{ weapons: CatalogWeapon[] }>("/skins/catalog"),
+  mySkins: () => request<{ items: SkinItems }>("/skins/mine"),
+  saveSkins: (items: SkinItems) =>
+    request<{ user: User; items: SkinItems }>("/skins/loadout", { method: "PUT", body: JSON.stringify(items) }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   lobbies: (query = "") => request<{ lobbies: Lobby[]; maps: string[]; formats: string[] }>(`/lobbies${query}`),
   lobby: (id: string) => request<Lobby>(`/lobbies/${id}`),

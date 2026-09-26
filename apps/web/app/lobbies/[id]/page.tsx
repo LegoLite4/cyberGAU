@@ -82,12 +82,18 @@ export default function LobbyPage() {
     setCopied(true);
   }
 
+  async function copyInvite() {
+    const link = `${window.location.origin}/invite/${lobby?.inviteCode}`;
+    await navigator.clipboard.writeText(link);
+    setCopied(true);
+  }
+
   if (!lobby) return <p className="lead">{error || "Загрузка лобби..."}</p>;
   const invite = typeof window === "undefined" ? "" : `${window.location.origin}/invite/${lobby.inviteCode}`;
 
   return (
     <div className="split">
-      <section className="panel">
+      <section className="panel" style={{ padding: 18 }}>
         <div className="meta">
           <span className="pill">{visibilityLabel(lobby.visibility)}</span>
           <span className={lobby.status === "live" ? "pill live" : "pill"}>{statusLabel(lobby.status)}</span>
@@ -99,19 +105,21 @@ export default function LobbyPage() {
         {lobby.error ? <p className="error">{lobby.error}</p> : null}
         {error ? <p className="error">{error}</p> : null}
         {lobby.connect ? (
-          <div>
+          <div className="stack" style={{ marginTop: 14 }}>
             <p className="connect">connect {lobby.connect}</p>
             <button className="btn" onClick={copyConnect}>{copied ? "Скопировано" : "Копировать connect"}</button>
           </div>
         ) : null}
         <div className="row" style={{ marginTop: 14 }}>
-          {lobby.hasPassword ? <input className="field" placeholder="Пароль" value={password} onChange={(event) => setPassword(event.target.value)} /> : null}
-          <button className="btn" disabled={pending} onClick={join}>Войти в лобби</button>
-          {lobby.isOwner && lobby.status !== "ended" ? <button className="btn primary" disabled={pending} onClick={start}>Старт матча</button> : null}
+          {lobby.hasPassword ? <input className="field" style={{ width: "auto" }} placeholder="Пароль" value={password} onChange={(event) => setPassword(event.target.value)} /> : null}
+          <button className="btn" disabled={pending} onClick={join}>Войти</button>
+          {lobby.isOwner && lobby.status !== "ended" ? <button className="btn primary" disabled={pending} onClick={start}>Запустить</button> : null}
           {lobby.isOwner && lobby.status === "live" ? <button className="btn danger" disabled={pending} onClick={stop}>Остановить</button> : null}
         </div>
-        <p className="meta" style={{ marginTop: 16 }}>Ссылка для друзей</p>
+        <h2 style={{ marginTop: 22 }}>Приглашение</h2>
         <p className="connect">{invite}</p>
+        <button className="btn" onClick={copyInvite}>Копировать ссылку</button>
+        <h2 style={{ marginTop: 22 }}>Состав</h2>
         <div className="members">
           {lobby.members.map((member) => (
             <div className="member" key={member.id}>
@@ -122,9 +130,10 @@ export default function LobbyPage() {
           ))}
         </div>
       </section>
-      <aside className="panel chat">
+      <aside className="panel chat" style={{ padding: 18 }}>
         <h2>Чат</h2>
         <div className="messages">
+          {messages.length === 0 ? <p className="empty">Сообщений пока нет.</p> : null}
           {messages.map((message) => (
             <div className="bubble" key={message.id}>
               <strong>{message.author}</strong>

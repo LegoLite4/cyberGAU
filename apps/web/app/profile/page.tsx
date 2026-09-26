@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, statusLabel, type Lobby, type User } from "../../lib/api";
+import { MatchRow } from "../components/MatchRow";
+import { api, type Lobby, type User } from "../../lib/api";
 
 export default function ProfilePage() {
   const [user, setUser] = useState<User | null>(null);
@@ -39,7 +40,7 @@ export default function ProfilePage() {
 
   if (error) {
     return (
-      <section>
+      <section className="panel empty-board">
         <h1>Профиль</h1>
         <p className="error">{error}</p>
         <Link className="btn primary" href="/login">Войти</Link>
@@ -48,43 +49,43 @@ export default function ProfilePage() {
   }
   if (!user) return <p className="lead">Загрузка профиля...</p>;
 
+  const noticeOk = notice.startsWith("Steam привязан") || notice.startsWith("Скинов");
+
   return (
     <>
       <section className="hero">
         <div className="userbox">
-          {user.avatarUrl ? <img className="avatar" src={user.avatarUrl} alt="" style={{ width: 72, height: 72 }} /> : <span className="avatar" />}
+          {user.avatarUrl ? <img className="avatar lg" src={user.avatarUrl} alt="" /> : <span className="avatar lg" />}
           <div>
+            <p className="kicker">Профиль</p>
             <h1>{user.personaName}</h1>
             <p className="lead">Логин {user.username || "не задан"}{user.cs2Hours !== null ? ` · ${user.cs2Hours} ч. CS2` : ""}</p>
           </div>
         </div>
       </section>
-      <section className="panel" style={{ marginBottom: 22 }}>
-        <h2>Steam для скинченджера</h2>
-        <p className="lead">Игра и лобби работают с логином cyberGAU. Steam нужен только чтобы подставить ваши настоящие скины на сервере. В чате игры логина нет.</p>
+      <section className="panel" id="skins" style={{ marginBottom: 22, padding: 18 }}>
+        <h2>Выбрать скины</h2>
+        <p className="lead">Любой скин из справочника CS2 сохраняется на аккаунт и надевается на сервере cyberGAU. Steam нужен, чтобы сервер узнал вас в игре.</p>
+        <div className="row" style={{ marginTop: 12 }}>
+          <Link className="btn primary" href="/skins">Открыть выбор скинов</Link>
+        </div>
         {user.steamId ? (
-          <>
+          <div className="stack" style={{ marginTop: 12 }}>
             <p className="meta">Привязан Steam {user.steamId}{user.skins.syncedAt ? ` · скины обновлены ${new Date(user.skins.syncedAt).toLocaleString("ru-RU")}` : ""}</p>
             <p className="meta">В наборе: {user.skins.count}</p>
             {user.skins.error ? <p className="error">{user.skins.error}</p> : null}
-            <button className="btn primary" onClick={refreshSkins} disabled={pending}>{pending ? "Читаем инвентарь..." : "Обновить скины"}</button>
-          </>
+            <button className="btn" onClick={refreshSkins} disabled={pending}>{pending ? "Читаем инвентарь..." : "Подставить из инвентаря Steam"}</button>
+          </div>
         ) : (
-          <a className="btn primary" href="/backend/auth/steam">Привязать Steam — нужно для скинченджера</a>
+          <a className="btn primary" href="/backend/auth/steam" style={{ display: "inline-block", marginTop: 12 }}>Привязать Steam — нужно для скинченджера</a>
         )}
-        {notice ? <p className={notice.startsWith("Steam привязан") || notice.startsWith("Скинов") ? "ok" : "error"}>{notice}</p> : null}
+        {notice ? <p className={noticeOk ? "ok" : "error"}>{notice}</p> : null}
       </section>
       <h2>История лобби</h2>
       {history.length === 0 ? <p className="empty">Пока пусто.</p> : null}
-      <section className="grid">
-        {history.map((lobby) => (
-          <Link key={lobby.id} href={`/lobbies/${lobby.id}`} className="card">
-            <span className="pill">{statusLabel(lobby.status)}</span>
-            <h3>{lobby.title}</h3>
-            <p className="meta">{lobby.map} · {lobby.format}</p>
-          </Link>
-        ))}
-      </section>
+      <div className="stack">
+        {history.map((lobby) => <MatchRow key={lobby.id} lobby={lobby} />)}
+      </div>
     </>
   );
 }
