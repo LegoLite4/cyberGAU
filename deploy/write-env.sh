@@ -18,7 +18,7 @@ fi
 
 rand() { openssl rand -base64 24 | tr -d '/+=' | head -c 28; }
 
-ACCESS="${CYBERGAU_ACCESS:-wireguard}"
+ACCESS="${CYBERGAU_ACCESS:-lan}"
 POOL_SIZE="${POOL_SIZE:-1}"
 INSTALL_PTERODACTYL="${INSTALL_PTERODACTYL:-1}"
 PG_PASS="${POSTGRES_PASSWORD:-$(rand)}"

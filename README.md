@@ -2,7 +2,7 @@
 
 Локальная платформа матчей CS2. Веб-лобби, вход через Steam и запуск уже установленных серверов через панель Pterodactyl. Свой интерфейс, без материалов Cybershoke.
 
-На тестовой машине игроки заходят через WireGuard. На основном ПК VPN не ставится: сайт и серверы слушают физический адрес локальной сети.
+По умолчанию сайт и серверы слушают IP основного интерфейса в LAN. Для удалённого теста можно включить WireGuard (`CYBERGAU_ACCESS=wireguard`).
 
 ## Что есть в интерфейсе
 
@@ -24,9 +24,9 @@
 curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh | sudo bash
 ```
 
-`get.sh` кладёт код в `/opt/cybergau`, пишет `/etc/cybergau/env` (пароли, IP, WireGuard), ставит Docker, сайт, API, PostgreSQL, `cybergau.service`, панель Pterodactyl и пул CS2. Переопределения: `CYBERGAU_ACCESS=lan`, `STEAM_WEB_API_KEY=...`, `WG_ENDPOINT=ip:51820`, `POOL_SIZE=1`, `FORCE_ENV=1`.
+`get.sh` кладёт код в `/opt/cybergau`, пишет `/etc/cybergau/env` (пароли и IP с основного интерфейса: 192.168.x / 10.x / …), ставит Docker, сайт, API, PostgreSQL, `cybergau.service`, панель Pterodactyl и пул CS2. По умолчанию `CYBERGAU_ACCESS=lan`. Переопределения: `CYBERGAU_ACCESS=wireguard`, `STEAM_WEB_API_KEY=...`, `WG_ENDPOINT=ip:51820`, `POOL_SIZE=1`, `FORCE_ENV=1`.
 
-После перезагрузки сами стартуют Docker, `cybergau.service`, `pteroq`, `wings` и, только на тесте, `wg-quick@wg0`.
+После перезагрузки сами стартуют Docker, `cybergau.service`, `pteroq`, `wings`; при wireguard ещё `wg-quick@wg0`.
 
 Обновление на сервере: `sudo bash /opt/cybergau/deploy/update.sh`.
 
@@ -50,4 +50,4 @@ docker compose --env-file .env up -d --build
 
 ## Тестовая VM
 
-Проверка Proxmox: свежая VM с Ubuntu — одна команда `bootstrap.sh` выше с `CYBERGAU_ACCESS=wireguard` и `POOL_SIZE=1`. На 8 ГБ держите один слот CS2.
+Проверка Proxmox: свежая VM с Ubuntu — одна команда-установщик выше (`POOL_SIZE=1`). Адреса возьмутся с LAN машины. На 8 ГБ держите один слот CS2.
