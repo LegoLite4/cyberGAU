@@ -118,6 +118,13 @@ for img in postgres:16-alpine node:22-alpine; do
   fi
 done
 
+# Собираем образы здесь (один раз), а не в systemd-сервисе на каждом старте.
+echo "docker compose build"
+(
+  cd /opt/cybergau
+  docker compose --env-file /opt/cybergau/.env build
+)
+
 systemctl restart cybergau.service
 
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
