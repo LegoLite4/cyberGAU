@@ -30,5 +30,6 @@ API_BASE="${SKIN_API_BASE:-http://10.77.0.1:3000/backend}"
 printf '%s\n' "{\"ApiBase\":\"${API_BASE}\"}" > "$OUT/stage/CybergauSkins/config.json"
 rm -f "$OUT/CybergauSkins.zip"
 (cd "$OUT/stage" && zip -r "$OUT/CybergauSkins.zip" CybergauSkins)
+export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
 docker compose --env-file /opt/cybergau/.env up -d --build
 systemctl restart cybergau.service || true

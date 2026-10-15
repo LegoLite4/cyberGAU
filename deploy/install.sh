@@ -36,6 +36,14 @@ if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
 else
   apt-get install -y docker-compose-plugin || true
 fi
+# Compose 2.40+ по умолчанию собирает через Bake; без buildx сборка зависает
+# на «load metadata» (Docker Hub / node base image).
+if apt-cache show docker-buildx >/dev/null 2>&1; then
+  apt-get install -y docker-buildx
+elif apt-cache show docker-buildx-plugin >/dev/null 2>&1; then
+  apt-get install -y docker-buildx-plugin
+fi
+export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
 systemctl enable --now docker
 systemctl enable --now qemu-guest-agent || true
 
@@ -83,6 +91,26 @@ fi
 install -m 644 /opt/cybergau/deploy/cybergau.service /etc/systemd/system/cybergau.service
 systemctl daemon-reload
 systemctl enable cybergau.service
+
+# Прогрев базовых образов: иначе «docker compose up --build» может надолго
+# зависнуть на load metadata, хотя curl до registry уже отвечает.
+for img in postgres:16-alpine node:22-alpine; do
+  echo "docker pull ${img}"
+  ok=0
+  for attempt in 1 2 3 4 5; do
+    if timeout 180 docker pull "$img"; then
+      ok=1
+      break
+    fi
+    echo "pull ${img} retry ${attempt}"
+    sleep 5
+  done
+  if [[ "$ok" != "1" ]]; then
+    echo "Не удалось скачать ${img} с Docker Hub"
+    exit 1
+  fi
+done
+
 systemctl restart cybergau.service
 
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
