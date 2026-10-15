@@ -7,9 +7,10 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 ENV_FILE=/etc/cybergau/env
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "Создайте $ENV_FILE из deploy/env.example"
-  exit 1
+  echo "Нет $ENV_FILE — генерирую через write-env.sh"
+  bash "$HERE/write-env.sh"
 fi
 
 set -a
