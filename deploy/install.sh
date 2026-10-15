@@ -93,20 +93,27 @@ systemctl daemon-reload
 systemctl enable cybergau.service
 
 # Прогрев базовых образов: иначе «docker compose up --build» может надолго
-# зависнуть на load metadata, хотя curl до registry уже отвечает.
-for img in postgres:16-alpine node:22-alpine; do
+# зависнуть на load metadata. Docker Hub иногда залипает — пробуем mirror.gcr.io.
+pull_image() {
+  local img="$1"
+  local mirror="mirror.gcr.io/library/${img}"
   echo "docker pull ${img}"
-  ok=0
+  local attempt
   for attempt in 1 2 3 4 5; do
-    if timeout 180 docker pull "$img"; then
-      ok=1
-      break
+    if timeout 240 docker pull "$mirror" && docker tag "$mirror" "$img"; then
+      return 0
+    fi
+    if timeout 240 docker pull "$img"; then
+      return 0
     fi
     echo "pull ${img} retry ${attempt}"
     sleep 5
   done
-  if [[ "$ok" != "1" ]]; then
-    echo "Не удалось скачать ${img} с Docker Hub"
+  return 1
+}
+for img in postgres:16-alpine node:22-alpine; do
+  if ! pull_image "$img"; then
+    echo "Не удалось скачать ${img} (Docker Hub / mirror.gcr.io)"
     exit 1
   fi
 done
