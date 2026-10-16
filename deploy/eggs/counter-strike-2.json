@@ -83,7 +83,7 @@
       "default_value": "",
       "user_viewable": true,
       "user_editable": true,
-      "rules": "nullable|alpha_num|size:32",
+      "rules": "nullable|alpha_num|max:32",
       "field_type": "text"
     },
     {
