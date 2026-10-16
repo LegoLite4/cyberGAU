@@ -8,7 +8,8 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/cybergau
 Environment=COMPOSE_BAKE=false
-ExecStart=/usr/bin/docker compose --env-file /opt/cybergau/.env up -d
+# --force-recreate api: иначе после смены .env (ключи панели) API остаётся со старыми пустыми env.
+ExecStart=/bin/bash -c 'docker compose --env-file /opt/cybergau/.env up -d && docker compose --env-file /opt/cybergau/.env up -d --force-recreate --no-deps api'
 ExecStop=/usr/bin/docker compose --env-file /opt/cybergau/.env down
 TimeoutStartSec=0
 

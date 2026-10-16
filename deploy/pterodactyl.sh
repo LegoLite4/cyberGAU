@@ -210,7 +210,8 @@ upsert_env() {
 }
 upsert_env PTERODACTYL_APP_KEY "$APP_KEY"
 upsert_env PTERODACTYL_CLIENT_KEY "$CLIENT_KEY"
-install -m 600 /etc/cybergau/env /opt/cybergau/.env
+# Сразу пересоздать API — иначе compose up -d оставит старый контейнер без ключей.
+bash /opt/cybergau/deploy/apply-env.sh
 
 AUTH=(-H "Authorization: Bearer ${APP_KEY}" -H "Accept: Application/vnd.pterodactyl.v1+json" -H "Content-Type: application/json")
 PANEL_HTTP_HOST="${BIND_ADDR:-127.0.0.1}"
@@ -438,9 +439,8 @@ if ! grep -q '^PTERODACTYL_APP_KEY=.\+' /etc/cybergau/env || ! grep -q '^PTERODA
   echo "Ключи панели не записаны в /etc/cybergau/env"
   exit 1
 fi
-install -m 600 /etc/cybergau/env /opt/cybergau/.env
-
-systemctl restart cybergau.service
+# Финальный sync env → контейнер (на случай если слоты создавались долго).
+bash /opt/cybergau/deploy/apply-env.sh
 PLUGIN_URL="${PUBLIC_WEB_URL:-http://${ADVERTISE_HOST:-${ALLOC_IP:-127.0.0.1}}:3000}"
 PLUGIN_URL="${PLUGIN_URL%/}/backend/skins/plugin.zip"
 echo "Pterodactyl: http://${PANEL_FQDN}:${PANEL_PORT:-8088}"

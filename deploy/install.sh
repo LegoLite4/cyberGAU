@@ -159,14 +159,20 @@ WEB="${WEB%/}"
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
   cybergau_step "pterodactyl.sh (panel + wings + CS2 pool)"
   bash /opt/cybergau/deploy/pterodactyl.sh
-  install -m 600 /etc/cybergau/env /opt/cybergau/.env
   # shellcheck disable=SC1090
   set -a; source /etc/cybergau/env; set +a
-  systemctl restart cybergau.service
+  cybergau_step "apply-env (force-recreate API with panel keys)"
+  bash /opt/cybergau/deploy/apply-env.sh
 
-  cybergau_step "acceptance: keys, nginx, wings, ServerSlot, plugin.zip"
+  cybergau_step "acceptance: keys in container, nginx, wings, ServerSlot, plugin.zip"
   if ! grep -q '^PTERODACTYL_APP_KEY=.\+' /etc/cybergau/env || ! grep -q '^PTERODACTYL_CLIENT_KEY=.\+' /etc/cybergau/env; then
     echo "Ключи PTERODACTYL_APP_KEY / PTERODACTYL_CLIENT_KEY пусты в /etc/cybergau/env"
+    exit 1
+  fi
+  if [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_APP_KEY 2>/dev/null || true)" ]] \
+    || [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_CLIENT_KEY 2>/dev/null || true)" ]]; then
+    echo "Ключи панели есть в файле, но НЕ внутри контейнера api — пул не заработает."
+    echo "Запустите: sudo bash /opt/cybergau/deploy/apply-env.sh"
     exit 1
   fi
   if ! systemctl is-active --quiet nginx; then
@@ -206,6 +212,7 @@ if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
   if [[ "$ok" != "1" ]]; then
     echo "Панель/пул/скины не готовы после install (free ServerSlot=${slots:-0}, plugin.zip ok=${plugin_ok})."
     echo "Проверьте: systemctl status nginx wings; ключи PTERODACTYL_* в /etc/cybergau/env; ${WEB}/backend/skins/plugin.zip"
+    echo "Ключи в контейнере: APP=$(docker exec cybergau-api-1 printenv PTERODACTYL_APP_KEY 2>/dev/null | wc -c) CLIENT=$(docker exec cybergau-api-1 printenv PTERODACTYL_CLIENT_KEY 2>/dev/null | wc -c)"
     docker ps -a --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || true
     docker logs cybergau-api-1 --tail 40 2>&1 || true
     exit 1
