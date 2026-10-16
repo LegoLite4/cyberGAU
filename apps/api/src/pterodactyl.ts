@@ -85,7 +85,10 @@ export async function configureAndStart(slot: {
   pterodactylId: number | null;
   identifier: string | null;
 }, settings: GameSettings): Promise<{ host: string; port: number }> {
-  if (!pterodactylConfigured() || !slot.pterodactylId || !slot.identifier) {
+  if (!pterodactylConfigured()) {
+    throw new Error("Игровой пул не настроен (нет ключей панели)");
+  }
+  if (!slot.pterodactylId || !slot.identifier) {
     throw new Error("Нет свободного сервера");
   }
   const appKey = env("PTERODACTYL_APP_KEY");

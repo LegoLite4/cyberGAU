@@ -464,7 +464,18 @@ const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? "0.0.0.0";
 
 async function main() {
-  await syncPanelServers().catch((error) => app.log.warn(error));
+  try {
+    await syncPanelServers();
+    const { prisma, pterodactylConfigured } = await import("./db");
+    if (pterodactylConfigured()) {
+      const free = await prisma.serverSlot.count({ where: { status: "free", purpose: "pool" } });
+      if (free < 1) {
+        app.log.error("Pterodactyl настроен, но в БД нет свободных ServerSlot (cybergau-*). Проверьте панель и POOL_SIZE.");
+      }
+    }
+  } catch (error) {
+    app.log.warn(error);
+  }
   await ensureMockSlot();
   await app.listen({ port, host });
 }

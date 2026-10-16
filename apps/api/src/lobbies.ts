@@ -1,10 +1,18 @@
 import { randomBytes } from "crypto";
 import type { Lobby, LobbyMember, ServerSlot, User } from "@prisma/client";
 import { FORMATS, MODES, connectString, isFormat, isMode, type ModeId } from "./catalog";
-import { mockServers, prisma } from "./db";
+import { mockServers, prisma, pterodactylConfigured } from "./db";
 import { configureAndStart, stopServer } from "./pterodactyl";
 
 const NO_SERVER = "Нет свободного сервера";
+const POOL_NOT_CONFIGURED = "Игровой пул не настроен (нет ключей панели)";
+
+function poolUnavailableError(): Error {
+  if (!mockServers() && !pterodactylConfigured()) {
+    return new Error(POOL_NOT_CONFIGURED);
+  }
+  return new Error(NO_SERVER);
+}
 
 type LobbyWithRelations = Lobby & {
   owner: User;
@@ -93,12 +101,12 @@ async function claimSlot(purpose: string, mode: string | null): Promise<ServerSl
       where: { status: "free", purpose: "pool" },
       orderBy: { createdAt: "asc" },
     });
-    if (!slot) throw new Error(NO_SERVER);
+    if (!slot) throw poolUnavailableError();
     const updated = await tx.serverSlot.updateMany({
       where: { id: slot.id, status: "free" },
       data: { status: "busy", purpose, mode },
     });
-    if (updated.count !== 1) throw new Error(NO_SERVER);
+    if (updated.count !== 1) throw poolUnavailableError();
     return tx.serverSlot.findUniqueOrThrow({ where: { id: slot.id } });
   });
 }

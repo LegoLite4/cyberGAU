@@ -179,8 +179,8 @@ source "$KEY_FILE"
 APP_KEY="${APP:-}"
 CLIENT_KEY="${CLIENT:-}"
 if [[ -z "$APP_KEY" || -z "$CLIENT_KEY" ]]; then
-  echo "Не удалось выпустить ключи панели. Веб cyberGAU продолжит работу без пула."
-  exit 0
+  echo "Не удалось выпустить ключи панели Pterodactyl (APP/CLIENT)."
+  exit 1
 fi
 
 upsert_env() {
@@ -264,6 +264,23 @@ systemctl daemon-reload
 systemctl reset-failed wings || true
 systemctl enable --now wings
 
+if [[ -z "${LOC_ID:-}" || -z "${NODE_ID:-}" ]]; then
+  echo "Панель не создала location/node (LOC_ID=${LOC_ID:-} NODE_ID=${NODE_ID:-})"
+  exit 1
+fi
+
+systemctl enable --now nginx
+systemctl enable --now wings
+if ! systemctl is-active --quiet nginx; then
+  echo "nginx не активен после установки панели"
+  exit 1
+fi
+if ! systemctl is-active --quiet wings; then
+  echo "wings не активен после установки панели"
+  systemctl status wings --no-pager -l || true
+  exit 1
+fi
+
 POOL="${POOL_SIZE:-1}"
 EXISTING="$(curl -sf "${AUTH[@]}" "$BASE/api/application/servers?per_page=100" | jq -r '[.data[].attributes.name | select(startswith("cybergau-"))] | length')"
 NEED=$((POOL - EXISTING))
@@ -272,32 +289,61 @@ if [[ "$NEED" -gt 0 ]]; then
   mkdir -p /var/lib/cybergau
   if [[ ! -s "$EGG_JSON" ]]; then
     echo "Нет шаблона CS2: $EGG_JSON"
-  else
-    NEST_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests" | jq -r '.data[0].attributes.id // empty')"
-    if [[ -z "$NEST_ID" ]]; then
-      NEST_ID="$(curl -sf "${AUTH[@]}" -d '{"name":"cyberGAU","description":"CS2 pool"}' "$BASE/api/application/nests" | jq -r '.attributes.id')"
-    fi
-    EGG_ID="$(cd "$PANEL_DIR" && PANEL_DIR="$PANEL_DIR" NEST_ID="$NEST_ID" EGG_PATH="$EGG_JSON" php /opt/cybergau/deploy/import-egg.php || true)"
-    if [[ -n "$EGG_ID" ]]; then
-      RCON_PASSWORD="$(openssl rand -hex 8)"
-      for i in $(seq 1 "$NEED"); do
-        PORT=$((27015 + EXISTING + i - 1))
-        ALLOC="$(curl -sf "${AUTH[@]}" -d "{\"ip\":\"${ALLOC_IP}\",\"ports\":[\"${PORT}\"]}" "$BASE/api/application/nodes/${NODE_ID}/allocations" | jq -r '.data[0].attributes.id // .attributes.id // empty')"
-        USER_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/users" | jq -r '.data[0].attributes.id')"
-        EGG_BODY="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs/${EGG_ID}?include=variables")"
-        STARTUP="$(echo "$EGG_BODY" | jq -r '.attributes.startup')"
-        IMAGE="$(echo "$EGG_BODY" | jq -r '.attributes.docker_image // (.attributes.docker_images | to_entries[0].value) // "ghcr.io/ptero-eggs/steamcmd:sniper"')"
-        SKIN_API="${PUBLIC_WEB_URL:-http://10.77.0.1:3000}"
-        SKIN_API="${SKIN_API%/}/backend"
-        ENV_JSON="$(jq -nc --arg rcon "$RCON_PASSWORD" --arg gslt "${STEAM_GSLT:-}" --arg skin "$SKIN_API" '{SRCDS_MAP:"de_dust2",SRCDS_APPID:"730",MAX_PLAYERS:"16",AUTO_UPDATE:"1",TV_PORT:"27020",STEAM_GSLT:$gslt,VAC_ENABLED:"0",RCON_ENABLED:"0",SERVER_NAME:"cyberGAU",SERVER_PASSWORD:"",RCON_PASSWORD:$rcon,GAME_MODE:"1",GAME_TYPE:"0",SKIN_API_BASE:$skin,SKIN_PLUGIN_URL:($skin + "/skins/plugin.zip")}')"
-        curl -sf "${AUTH[@]}" -d "{\"name\":\"cybergau-$((EXISTING + i))\",\"user\":${USER_ID},\"egg\":${EGG_ID},\"docker_image\":\"${IMAGE}\",\"startup\":$(echo "$STARTUP" | jq -Rs .),\"environment\":${ENV_JSON},\"limits\":{\"memory\":${CS2_MEMORY_MB:-2048},\"swap\":0,\"disk\":${CS2_DISK_MB:-90000},\"io\":500,\"cpu\":${CS2_CPU:-200}},\"feature_limits\":{\"databases\":0,\"allocations\":0,\"backups\":0},\"allocation\":{\"default\":${ALLOC}},\"start_on_completion\":false}" \
-          "$BASE/api/application/servers" >/dev/null || echo "Слот cybergau-$((EXISTING + i)) не создан"
-      done
-    else
-      echo "Egg CS2 не импортирован. Повторите deploy/pterodactyl.sh"
-    fi
+    exit 1
   fi
+  NEST_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests" | jq -r '.data[0].attributes.id // empty')"
+  if [[ -z "$NEST_ID" ]]; then
+    NEST_ID="$(curl -sf "${AUTH[@]}" -d '{"name":"cyberGAU","description":"CS2 pool"}' "$BASE/api/application/nests" | jq -r '.attributes.id')"
+  fi
+  if [[ -z "$NEST_ID" ]]; then
+    echo "Не удалось создать nest для CS2"
+    exit 1
+  fi
+  EGG_ID="$(cd "$PANEL_DIR" && PANEL_DIR="$PANEL_DIR" NEST_ID="$NEST_ID" EGG_PATH="$EGG_JSON" php /opt/cybergau/deploy/import-egg.php)"
+  if [[ -z "$EGG_ID" ]]; then
+    echo "Egg CS2 не импортирован"
+    exit 1
+  fi
+  RCON_PASSWORD="$(openssl rand -hex 8)"
+  for i in $(seq 1 "$NEED"); do
+    PORT=$((27015 + EXISTING + i - 1))
+    ALLOC="$(curl -sf "${AUTH[@]}" -d "{\"ip\":\"${ALLOC_IP}\",\"ports\":[\"${PORT}\"]}" "$BASE/api/application/nodes/${NODE_ID}/allocations" | jq -r '.data[0].attributes.id // .attributes.id // empty')"
+    if [[ -z "$ALLOC" ]]; then
+      echo "Не удалось создать allocation на порту ${PORT}"
+      exit 1
+    fi
+    USER_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/users" | jq -r '.data[0].attributes.id')"
+    if [[ -z "$USER_ID" || "$USER_ID" == "null" ]]; then
+      echo "В панели нет пользователя для слота CS2"
+      exit 1
+    fi
+    EGG_BODY="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs/${EGG_ID}?include=variables")"
+    STARTUP="$(echo "$EGG_BODY" | jq -r '.attributes.startup')"
+    IMAGE="$(echo "$EGG_BODY" | jq -r '.attributes.docker_image // (.attributes.docker_images | to_entries[0].value) // "ghcr.io/ptero-eggs/steamcmd:sniper"')"
+    SKIN_API="${PUBLIC_WEB_URL:-http://10.77.0.1:3000}"
+    SKIN_API="${SKIN_API%/}/backend"
+    ENV_JSON="$(jq -nc --arg rcon "$RCON_PASSWORD" --arg gslt "${STEAM_GSLT:-}" --arg skin "$SKIN_API" '{SRCDS_MAP:"de_dust2",SRCDS_APPID:"730",MAX_PLAYERS:"16",AUTO_UPDATE:"1",TV_PORT:"27020",STEAM_GSLT:$gslt,VAC_ENABLED:"0",RCON_ENABLED:"0",SERVER_NAME:"cyberGAU",SERVER_PASSWORD:"",RCON_PASSWORD:$rcon,GAME_MODE:"1",GAME_TYPE:"0",SKIN_API_BASE:$skin,SKIN_PLUGIN_URL:($skin + "/skins/plugin.zip")}')"
+    SLOT_NAME="cybergau-$((EXISTING + i))"
+    if ! curl -sf "${AUTH[@]}" -d "{\"name\":\"${SLOT_NAME}\",\"user\":${USER_ID},\"egg\":${EGG_ID},\"docker_image\":\"${IMAGE}\",\"startup\":$(echo "$STARTUP" | jq -Rs .),\"environment\":${ENV_JSON},\"limits\":{\"memory\":${CS2_MEMORY_MB:-2048},\"swap\":0,\"disk\":${CS2_DISK_MB:-90000},\"io\":500,\"cpu\":${CS2_CPU:-200}},\"feature_limits\":{\"databases\":0,\"allocations\":0,\"backups\":0},\"allocation\":{\"default\":${ALLOC}},\"start_on_completion\":false}" \
+      "$BASE/api/application/servers" >/dev/null; then
+      echo "Слот ${SLOT_NAME} не создан"
+      exit 1
+    fi
+  done
 fi
 
-systemctl restart cybergau.service || true
+FINAL_COUNT="$(curl -sf "${AUTH[@]}" "$BASE/api/application/servers?per_page=100" | jq -r '[.data[].attributes.name | select(startswith("cybergau-"))] | length')"
+if [[ "${FINAL_COUNT:-0}" -lt "$POOL" ]]; then
+  echo "В панели только ${FINAL_COUNT:-0} слот(ов) cybergau-*, нужно ${POOL}"
+  exit 1
+fi
+
+if ! grep -q '^PTERODACTYL_APP_KEY=.\+' /etc/cybergau/env || ! grep -q '^PTERODACTYL_CLIENT_KEY=.\+' /etc/cybergau/env; then
+  echo "Ключи панели не записаны в /etc/cybergau/env"
+  exit 1
+fi
+install -m 600 /etc/cybergau/env /opt/cybergau/.env
+
+systemctl restart cybergau.service
 echo "Pterodactyl: http://${PANEL_FQDN}:${PANEL_PORT:-8088}"
+echo "Пул CS2: ${FINAL_COUNT} слот(ов) cybergau-*"

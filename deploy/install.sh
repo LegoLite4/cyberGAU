@@ -129,6 +129,30 @@ systemctl restart cybergau.service
 
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
   bash /opt/cybergau/deploy/pterodactyl.sh
+  install -m 600 /etc/cybergau/env /opt/cybergau/.env
+  systemctl restart cybergau.service
+
+  # Дождаться API и убедиться, что syncPanelServers положил free-слот в БД.
+  ok=0
+  slots=0
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    if curl -sf --max-time 5 "${PUBLIC_WEB_URL:-http://127.0.0.1:3000}/backend/health" >/dev/null 2>&1 \
+      || docker exec cybergau-api-1 wget -q -O /dev/null http://127.0.0.1:4000/health 2>/dev/null; then
+      slots="$(docker exec cybergau-postgres-1 psql -U "${POSTGRES_USER:-cybergau}" -d "${POSTGRES_DB:-cybergau}" -Atc \
+        "SELECT count(*) FROM \"ServerSlot\" WHERE status='free' AND purpose='pool';" 2>/dev/null || echo 0)"
+      if [[ "${slots:-0}" -ge 1 ]]; then
+        ok=1
+        break
+      fi
+    fi
+    sleep 5
+  done
+  if [[ "$ok" != "1" ]]; then
+    echo "Панель/пул не готовы: в БД нет свободного ServerSlot после install."
+    echo "Проверьте: systemctl status nginx wings; ключи PTERODACTYL_* в /etc/cybergau/env"
+    exit 1
+  fi
+  echo "Игровой пул готов: ${slots} свободный слот(ов)"
 fi
 
 echo "cyberGAU запущен. Сайт: ${PUBLIC_WEB_URL:-http://127.0.0.1:3000}"
