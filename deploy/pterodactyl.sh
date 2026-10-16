@@ -32,7 +32,11 @@ apt-get install -y \
   php8.3-bcmath php8.3-xml php8.3-curl php8.3-zip php8.3-intl php8.3-redis
 
 if ! command -v composer >/dev/null 2>&1; then
-  curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+  # Pipe to php can hang on flaky TLS; download to a file with timeouts/retries.
+  curl -fsSL --connect-timeout 15 --max-time 120 --retry 5 --retry-delay 2 \
+    -o /tmp/composer-setup.php https://getcomposer.org/installer
+  php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer
+  rm -f /tmp/composer-setup.php
 fi
 
 mysql -e "CREATE DATABASE IF NOT EXISTS panel;"
@@ -44,7 +48,8 @@ PANEL_DIR=/var/www/pterodactyl
 if [[ ! -f "$PANEL_DIR/.env" ]] || ! grep -q '^APP_KEY=base64:' "$PANEL_DIR/.env"; then
   mkdir -p "$PANEL_DIR"
   cd "$PANEL_DIR"
-  curl -L -o panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
+  curl -fsSL --connect-timeout 15 --max-time 300 --retry 5 --retry-delay 2 \
+    -o panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
   tar -xzf panel.tar.gz
   chmod -R 755 storage bootstrap/cache || true
   cp -n .env.example .env
@@ -161,7 +166,8 @@ crontab -u www-data "$cron_tmp"
 rm -f "$cron_tmp"
 
 if ! command -v wings >/dev/null 2>&1; then
-  curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64"
+  curl -fsSL --connect-timeout 15 --max-time 180 --retry 5 --retry-delay 2 \
+    -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64"
   chmod +x /usr/local/bin/wings
 fi
 mkdir -p /etc/pterodactyl
@@ -305,9 +311,22 @@ if [[ "$NEED" -gt 0 ]]; then
     exit 1
   fi
   RCON_PASSWORD="$(openssl rand -hex 8)"
+  find_alloc() {
+    local port="$1"
+    curl -sf "${AUTH[@]}" "$BASE/api/application/nodes/${NODE_ID}/allocations?per_page=100" \
+      | jq -r --arg ip "$ALLOC_IP" --argjson port "$port" \
+        '.data[] | select(.attributes.ip == $ip and .attributes.port == $port and (.attributes.assigned | not)) | .attributes.id' \
+      | head -n1
+  }
   for i in $(seq 1 "$NEED"); do
     PORT=$((27015 + EXISTING + i - 1))
-    ALLOC="$(curl -sf "${AUTH[@]}" -d "{\"ip\":\"${ALLOC_IP}\",\"ports\":[\"${PORT}\"]}" "$BASE/api/application/nodes/${NODE_ID}/allocations" | jq -r '.data[0].attributes.id // .attributes.id // empty')"
+    ALLOC="$(find_alloc "$PORT")"
+    if [[ -z "$ALLOC" ]]; then
+      # Panel may return 204 with empty body when the port already exists.
+      curl -sf "${AUTH[@]}" -d "{\"ip\":\"${ALLOC_IP}\",\"ports\":[\"${PORT}\"]}" \
+        "$BASE/api/application/nodes/${NODE_ID}/allocations" >/dev/null || true
+      ALLOC="$(find_alloc "$PORT")"
+    fi
     if [[ -z "$ALLOC" ]]; then
       echo "Не удалось создать allocation на порту ${PORT}"
       exit 1
@@ -320,7 +339,7 @@ if [[ "$NEED" -gt 0 ]]; then
     EGG_BODY="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests/${NEST_ID}/eggs/${EGG_ID}?include=variables")"
     STARTUP="$(echo "$EGG_BODY" | jq -r '.attributes.startup')"
     IMAGE="$(echo "$EGG_BODY" | jq -r '.attributes.docker_image // (.attributes.docker_images | to_entries[0].value) // "ghcr.io/ptero-eggs/steamcmd:sniper"')"
-    SKIN_API="${PUBLIC_WEB_URL:-http://10.77.0.1:3000}"
+    SKIN_API="${PUBLIC_WEB_URL:-http://${ADVERTISE_HOST:-${ALLOC_IP:-127.0.0.1}}:3000}"
     SKIN_API="${SKIN_API%/}/backend"
     ENV_JSON="$(jq -nc --arg rcon "$RCON_PASSWORD" --arg gslt "${STEAM_GSLT:-}" --arg skin "$SKIN_API" '{SRCDS_MAP:"de_dust2",SRCDS_APPID:"730",MAX_PLAYERS:"16",AUTO_UPDATE:"1",TV_PORT:"27020",STEAM_GSLT:$gslt,VAC_ENABLED:"0",RCON_ENABLED:"0",SERVER_NAME:"cyberGAU",SERVER_PASSWORD:"",RCON_PASSWORD:$rcon,GAME_MODE:"1",GAME_TYPE:"0",SKIN_API_BASE:$skin,SKIN_PLUGIN_URL:($skin + "/skins/plugin.zip")}')"
     SLOT_NAME="cybergau-$((EXISTING + i))"
@@ -345,5 +364,14 @@ fi
 install -m 600 /etc/cybergau/env /opt/cybergau/.env
 
 systemctl restart cybergau.service
+PLUGIN_URL="${PUBLIC_WEB_URL:-http://${ADVERTISE_HOST:-${ALLOC_IP:-127.0.0.1}}:3000}"
+PLUGIN_URL="${PLUGIN_URL%/}/backend/skins/plugin.zip"
 echo "Pterodactyl: http://${PANEL_FQDN}:${PANEL_PORT:-8088}"
 echo "Пул CS2: ${FINAL_COUNT} слот(ов) cybergau-*"
+echo "Скинченджер: ${PLUGIN_URL}"
+if [[ -z "${STEAM_WEB_API_KEY:-}" ]]; then
+  echo "Предупреждение: STEAM_WEB_API_KEY пуст — аватар/часы Steam недоступны"
+fi
+if [[ -z "${STEAM_GSLT:-}" ]]; then
+  echo "Предупреждение: STEAM_GSLT пуст — LAN-сервер без токена (ok для -insecure)"
+fi

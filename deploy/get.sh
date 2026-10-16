@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 # Публичный установщик cyberGAU (клон + автонастройка + install).
 #
-#   curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh \
+#     | sudo STEAM_WEB_API_KEY=ВАШ_КЛЮЧ bash
 #
-# Опции: CYBERGAU_ACCESS=lan STEAM_WEB_API_KEY=... WG_ENDPOINT=ip:51820 POOL_SIZE=1 CYBERGAU_BRANCH=main
+# Обязательно: STEAM_WEB_API_KEY (https://steamcommunity.com/dev/apikey — домен: localhost или LAN-IP)
+# Опции: CYBERGAU_ACCESS=lan STEAM_GSLT=... WG_ENDPOINT=ip:51820 POOL_SIZE=1 CYBERGAU_BRANCH=main
 set -euo pipefail
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  echo "Нужен root: curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh | sudo bash"
+  echo "Нужен root:"
+  echo "  curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh | sudo STEAM_WEB_API_KEY=ВАШ_КЛЮЧ bash"
+  exit 1
+fi
+
+if [[ -z "${STEAM_WEB_API_KEY:-}" ]]; then
+  echo "Задайте STEAM_WEB_API_KEY (ключ с https://steamcommunity.com/dev/apikey)."
+  echo "Для локальной платформы в поле «Домен» укажите localhost или ваш LAN-IP."
+  echo "Пример:"
+  echo "  curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh | sudo STEAM_WEB_API_KEY=ВАШ_КЛЮЧ bash"
   exit 1
 fi
 

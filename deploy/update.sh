@@ -26,7 +26,9 @@ for i in 1 2 3 4 5 6; do
 done
 test "$ok" = 1
 rm -f "$OUT/stage/CybergauSkins/CounterStrikeSharp.API.dll" "$OUT/stage/CybergauSkins/CounterStrikeSharp.API.pdb"
-API_BASE="${SKIN_API_BASE:-http://10.77.0.1:3000/backend}"
+API_BASE="${SKIN_API_BASE:-${PUBLIC_WEB_URL:-http://127.0.0.1:3000}/backend}"
+API_BASE="${API_BASE%/}"
+API_BASE="${API_BASE%/backend}/backend"
 printf '%s\n' "{\"ApiBase\":\"${API_BASE}\"}" > "$OUT/stage/CybergauSkins/config.json"
 rm -f "$OUT/CybergauSkins.zip"
 (cd "$OUT/stage" && zip -r "$OUT/CybergauSkins.zip" CybergauSkins)

@@ -57,6 +57,17 @@ CYBERGAU_REPO="${CYBERGAU_REPO:-https://github.com/LegoLite4/cyberGAU.git}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@cybergau.local}"
 ADMIN_USER="${ADMIN_USER:-admin}"
 
+if [[ -z "$STEAM_WEB_API_KEY" ]]; then
+  echo "Нужен STEAM_WEB_API_KEY — без него привязка Steam (аватар/часы) и полный функционал скинов не готовы."
+  echo "1) Откройте https://steamcommunity.com/dev/apikey (войдите в Steam)"
+  echo "2) Домен для локальной платформы: localhost или ваш LAN-IP (например 192.168.0.19) или cybergau.local"
+  echo "3) Примите условия, Register, скопируйте ключ"
+  echo "4) Запуск:"
+  echo "   curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh | sudo STEAM_WEB_API_KEY=ВАШ_КЛЮЧ bash"
+  echo "   или: sudo STEAM_WEB_API_KEY=ВАШ_КЛЮЧ bash deploy/bootstrap.sh"
+  exit 1
+fi
+
 install -d -m 755 /etc/cybergau
 umask 077
 cat >"$ENV_FILE" <<EOF
@@ -104,6 +115,7 @@ chmod 600 "$ENV_FILE"
 echo "Записан $ENV_FILE"
 echo "  ACCESS=${ACCESS}  HOST=${HOST_IP}  POOL_SIZE=${POOL_SIZE}"
 echo "  ADMIN_USER=${ADMIN_USER}  ADMIN_PASSWORD=${ADMIN_PASS}"
-if [[ -z "$STEAM_WEB_API_KEY" ]]; then
-  echo "  STEAM_WEB_API_KEY пуст — позже допишите в $ENV_FILE и перезапустите cybergau.service"
+echo "  STEAM_WEB_API_KEY задан"
+if [[ -z "$STEAM_GSLT" ]]; then
+  echo "  STEAM_GSLT пуст — для LAN обычно достаточно; при необходимости допишите в $ENV_FILE"
 fi

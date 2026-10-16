@@ -21,6 +21,13 @@ set +a
 : "${CYBERGAU_ACCESS:?CYBERGAU_ACCESS is required}"
 : "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 
+if [[ -z "${STEAM_WEB_API_KEY:-}" ]]; then
+  echo "В $ENV_FILE нет STEAM_WEB_API_KEY."
+  echo "Получите ключ: https://steamcommunity.com/dev/apikey (домен: localhost или LAN-IP)."
+  echo "Допишите STEAM_WEB_API_KEY=... в $ENV_FILE или: sudo FORCE_ENV=1 STEAM_WEB_API_KEY=ВАШ_КЛЮЧ bash deploy/write-env.sh"
+  exit 1
+fi
+
 if [[ "$CYBERGAU_ACCESS" != "wireguard" && "$CYBERGAU_ACCESS" != "lan" ]]; then
   echo "CYBERGAU_ACCESS должен быть wireguard или lan"
   exit 1
@@ -127,20 +134,57 @@ echo "docker compose build"
 
 systemctl restart cybergau.service
 
+# Порты для сайта, панели, Wings и CS2 (если ufw уже включён).
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
+  ufw allow 3000/tcp comment 'cyberGAU web' || true
+  ufw allow "${PANEL_PORT:-8088}/tcp" comment 'cyberGAU panel' || true
+  ufw allow 8080/tcp comment 'cyberGAU wings' || true
+  ufw allow 27015:27030/tcp comment 'cyberGAU CS2' || true
+  ufw allow 27015:27030/udp comment 'cyberGAU CS2' || true
+  if [[ "$CYBERGAU_ACCESS" == "wireguard" ]]; then
+    ufw allow 51820/udp comment 'cyberGAU wireguard' || true
+  fi
+fi
+
+WEB="${PUBLIC_WEB_URL:-http://127.0.0.1:3000}"
+WEB="${WEB%/}"
+
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
   bash /opt/cybergau/deploy/pterodactyl.sh
   install -m 600 /etc/cybergau/env /opt/cybergau/.env
+  # shellcheck disable=SC1090
+  set -a; source /etc/cybergau/env; set +a
   systemctl restart cybergau.service
 
-  # Дождаться API и убедиться, что syncPanelServers положил free-слот в БД.
+  if ! grep -q '^PTERODACTYL_APP_KEY=.\+' /etc/cybergau/env || ! grep -q '^PTERODACTYL_CLIENT_KEY=.\+' /etc/cybergau/env; then
+    echo "Ключи PTERODACTYL_APP_KEY / PTERODACTYL_CLIENT_KEY пусты в /etc/cybergau/env"
+    exit 1
+  fi
+  if ! systemctl is-active --quiet nginx; then
+    echo "nginx не активен после установки панели"
+    exit 1
+  fi
+  if ! systemctl is-active --quiet wings; then
+    echo "wings не активен после установки панели"
+    systemctl status wings --no-pager -l || true
+    exit 1
+  fi
+
+  # Дождаться API, free ServerSlot и plugin.zip для скинченджера.
   ok=0
   slots=0
+  plugin_ok=0
   for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    if curl -sf --max-time 5 "${PUBLIC_WEB_URL:-http://127.0.0.1:3000}/backend/health" >/dev/null 2>&1 \
+    if curl -sf --max-time 5 "${WEB}/backend/health" >/dev/null 2>&1 \
       || docker exec cybergau-api-1 wget -q -O /dev/null http://127.0.0.1:4000/health 2>/dev/null; then
       slots="$(docker exec cybergau-postgres-1 psql -U "${POSTGRES_USER:-cybergau}" -d "${POSTGRES_DB:-cybergau}" -Atc \
         "SELECT count(*) FROM \"ServerSlot\" WHERE status='free' AND purpose='pool';" 2>/dev/null || echo 0)"
-      if [[ "${slots:-0}" -ge 1 ]]; then
+      if curl -sfI --max-time 5 "${WEB}/backend/skins/plugin.zip" 2>/dev/null | head -n1 | grep -qE 'HTTP/[0-9.]+ 200'; then
+        plugin_ok=1
+      elif docker exec cybergau-api-1 wget -q -S -O /dev/null http://127.0.0.1:4000/skins/plugin.zip 2>&1 | grep -q '200 OK'; then
+        plugin_ok=1
+      fi
+      if [[ "${slots:-0}" -ge 1 && "$plugin_ok" == "1" ]]; then
         ok=1
         break
       fi
@@ -148,14 +192,19 @@ if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
     sleep 5
   done
   if [[ "$ok" != "1" ]]; then
-    echo "Панель/пул не готовы: в БД нет свободного ServerSlot после install."
-    echo "Проверьте: systemctl status nginx wings; ключи PTERODACTYL_* в /etc/cybergau/env"
+    echo "Панель/пул/скины не готовы после install (free ServerSlot=${slots:-0}, plugin.zip ok=${plugin_ok})."
+    echo "Проверьте: systemctl status nginx wings; ключи PTERODACTYL_* в /etc/cybergau/env; ${WEB}/backend/skins/plugin.zip"
     exit 1
   fi
-  echo "Игровой пул готов: ${slots} свободный слот(ов)"
+  echo "Игровой пул готов: ${slots} свободный слот(ов); скинченджер: ${WEB}/backend/skins/plugin.zip"
 fi
 
-echo "cyberGAU запущен. Сайт: ${PUBLIC_WEB_URL:-http://127.0.0.1:3000}"
+if [[ -z "${STEAM_GSLT:-}" ]]; then
+  echo "Предупреждение: STEAM_GSLT пуст — dedicated CS2 без Game Server Login Token (для LAN обычно ок)."
+fi
+
+echo "cyberGAU запущен. Сайт: ${WEB}"
+echo "Привязка Steam: зарегистрируйтесь на сайте, затем «Привязать Steam» (нужен STEAM_WEB_API_KEY в env)."
 if [[ "$CYBERGAU_ACCESS" == "wireguard" ]]; then
   echo "Клиент WireGuard: /etc/cybergau/wg-client.conf"
 fi

@@ -2,16 +2,24 @@
 # Одна команда: клон (если нужно) → env → полная установка cyberGAU (+ панель при INSTALL_PTERODACTYL=1).
 #
 # Примеры:
-#   sudo bash deploy/bootstrap.sh
-#   sudo CYBERGAU_ACCESS=lan bash /opt/cybergau/deploy/bootstrap.sh
+#   sudo STEAM_WEB_API_KEY=xxx bash deploy/bootstrap.sh
+#   sudo STEAM_WEB_API_KEY=xxx CYBERGAU_ACCESS=lan bash /opt/cybergau/deploy/bootstrap.sh
 #   sudo STEAM_WEB_API_KEY=xxx WG_ENDPOINT=1.2.3.4:51820 bash deploy/bootstrap.sh
+#
+# Ключ: https://steamcommunity.com/dev/apikey (домен: localhost или LAN-IP)
 #
 # Свежая Ubuntu с deploy-ключом:
 #   sudo bash -c 'export GIT_SSH_COMMAND="ssh -i /root/.ssh/cybergau_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"; git clone --depth 1 git@github.com:LegoLite4/cyberGAU.git /opt/cybergau && exec bash /opt/cybergau/deploy/bootstrap.sh'
 set -euo pipefail
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  echo "Запустите: sudo bash deploy/bootstrap.sh"
+  echo "Запустите: sudo STEAM_WEB_API_KEY=ВАШ_КЛЮЧ bash deploy/bootstrap.sh"
+  exit 1
+fi
+
+if [[ -z "${STEAM_WEB_API_KEY:-}" ]]; then
+  echo "Нужен STEAM_WEB_API_KEY. См. https://steamcommunity.com/dev/apikey (домен: localhost или LAN-IP)."
+  echo "  sudo STEAM_WEB_API_KEY=ВАШ_КЛЮЧ bash deploy/bootstrap.sh"
   exit 1
 fi
 
@@ -73,7 +81,9 @@ bash "$TARGET/deploy/install.sh"
 echo
 echo "Готово. Одна команда отработала до конца."
 echo "Сайт: $(grep -E '^PUBLIC_WEB_URL=' /etc/cybergau/env | cut -d= -f2-)"
+echo "Скинченджер: $(grep -E '^PUBLIC_WEB_URL=' /etc/cybergau/env | cut -d= -f2-)/backend/skins/plugin.zip"
 if grep -q '^CYBERGAU_ACCESS=wireguard' /etc/cybergau/env; then
   echo "WireGuard-клиент: /etc/cybergau/wg-client.conf"
 fi
 echo "Пароль админа панели: $(grep -E '^ADMIN_PASSWORD=' /etc/cybergau/env | cut -d= -f2-)"
+echo "STEAM_WEB_API_KEY задан в /etc/cybergau/env (привязка Steam / профиль)."

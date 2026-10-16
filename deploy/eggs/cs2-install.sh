@@ -50,8 +50,13 @@ if [[ -f "$GAMEINFO" ]] && ! grep -q "addons/metamod" "$GAMEINFO"; then
   awk 'BEGIN{done=0} { if (done==0 && $0 ~ /Game[[:space:]]+csgo[[:space:]]*$/) { print "\t\t\tGame\tcsgo/addons/metamod"; done=1 } print }' "$GAMEINFO" > "$GAMEINFO.new"
   mv "$GAMEINFO.new" "$GAMEINFO"
 fi
-SKIN_PLUGIN_URL="${SKIN_PLUGIN_URL:-http://10.77.0.1:3000/backend/skins/plugin.zip}"
-SKIN_API_BASE="${SKIN_API_BASE:-http://10.77.0.1:3000/backend}"
+# Panel/slot env must set these (pterodactyl.sh uses PUBLIC_WEB_URL). Fallback: docker bridge → host.
+SKIN_API_BASE="${SKIN_API_BASE:-http://172.17.0.1:3000/backend}"
+SKIN_PLUGIN_URL="${SKIN_PLUGIN_URL:-${SKIN_API_BASE%/}/skins/plugin.zip}"
+if [[ -z "$SKIN_PLUGIN_URL" || "$SKIN_PLUGIN_URL" == *10.77.0.1* ]]; then
+  echo "SKIN_PLUGIN_URL must point to cyberGAU API (.../backend/skins/plugin.zip), got: ${SKIN_PLUGIN_URL:-empty}"
+  exit 1
+fi
 mkdir -p "$CSGO/addons/counterstrikesharp/plugins"
 curl -fsSL -o /tmp/cybergau-skins.zip "$SKIN_PLUGIN_URL"
 unzip -o /tmp/cybergau-skins.zip -d "$CSGO/addons/counterstrikesharp/plugins"
