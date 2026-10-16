@@ -36,6 +36,10 @@ TARGET=/opt/cybergau
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$(cd "$HERE/.." && pwd)"
 
+# shellcheck disable=SC1091
+source "$HERE/install-log.sh"
+cybergau_step "bootstrap start (branch=${BRANCH})"
+
 if [[ -z "${GIT_SSH_COMMAND:-}" && -f "$DEPLOY_KEY" ]]; then
   export GIT_SSH_COMMAND="ssh -i ${DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 fi
@@ -44,8 +48,18 @@ apt-get update -qq
 apt-get install -y -qq ca-certificates curl git openssl >/dev/null
 
 ensure_repo() {
-  if [[ -d "$TARGET/.git" || -f "$TARGET/deploy/install.sh" ]]; then
-    echo "Код уже в $TARGET"
+  if [[ -d "$TARGET/.git" ]]; then
+    echo "Обновляю ${TARGET} → origin/${BRANCH}"
+    git -C "$TARGET" remote set-url origin "https://github.com/${REPO_SLUG}.git" 2>/dev/null || true
+    git -C "$TARGET" fetch --depth 1 origin "$BRANCH"
+    git -C "$TARGET" checkout -B "$BRANCH" "origin/${BRANCH}"
+    git -C "$TARGET" reset --hard "origin/${BRANCH}"
+    git -C "$TARGET" clean -fd
+    echo "HEAD: $(git -C "$TARGET" rev-parse --short HEAD) $(git -C "$TARGET" log -1 --pretty=%s)"
+    return 0
+  fi
+  if [[ -f "$TARGET/deploy/install.sh" ]]; then
+    echo "Код уже в $TARGET (без .git)"
     return 0
   fi
   if [[ -f "$SRC/deploy/install.sh" && "$SRC" != "$TARGET" ]]; then
@@ -75,7 +89,9 @@ ensure_repo() {
 
 ensure_repo
 
+cybergau_step "write-env"
 bash "$TARGET/deploy/write-env.sh"
+cybergau_step "install.sh"
 bash "$TARGET/deploy/install.sh"
 
 echo
@@ -87,3 +103,4 @@ if grep -q '^CYBERGAU_ACCESS=wireguard' /etc/cybergau/env; then
 fi
 echo "Пароль админа панели: $(grep -E '^ADMIN_PASSWORD=' /etc/cybergau/env | cut -d= -f2-)"
 echo "STEAM_WEB_API_KEY задан в /etc/cybergau/env (привязка Steam / профиль)."
+echo "Лог установки: ${CYBERGAU_INSTALL_LOG:-/var/log/cybergau-install.log}"

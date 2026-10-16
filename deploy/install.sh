@@ -8,6 +8,10 @@ fi
 
 ENV_FILE=/etc/cybergau/env
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$HERE/install-log.sh"
+cybergau_step "install.sh start"
+
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Нет $ENV_FILE — генерирую через write-env.sh"
   bash "$HERE/write-env.sh"
@@ -51,6 +55,7 @@ elif apt-cache show docker-buildx-plugin >/dev/null 2>&1; then
   apt-get install -y docker-buildx-plugin
 fi
 export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
+cybergau_step "docker + qemu-guest-agent"
 systemctl enable --now docker
 systemctl enable --now qemu-guest-agent || true
 
@@ -126,15 +131,17 @@ for img in postgres:16-alpine node:22-alpine; do
 done
 
 # Собираем образы здесь (один раз), а не в systemd-сервисе на каждом старте.
-echo "docker compose build"
+cybergau_step "docker compose build"
 (
   cd /opt/cybergau
   docker compose --env-file /opt/cybergau/.env build
 )
 
+cybergau_step "systemctl restart cybergau.service"
 systemctl restart cybergau.service
 
 # Порты для сайта, панели, Wings и CS2 (если ufw уже включён).
+cybergau_step "ufw ports (если active)"
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
   ufw allow 3000/tcp comment 'cyberGAU web' || true
   ufw allow "${PANEL_PORT:-8088}/tcp" comment 'cyberGAU panel' || true
@@ -150,23 +157,27 @@ WEB="${PUBLIC_WEB_URL:-http://127.0.0.1:3000}"
 WEB="${WEB%/}"
 
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
+  cybergau_step "pterodactyl.sh (panel + wings + CS2 pool)"
   bash /opt/cybergau/deploy/pterodactyl.sh
   install -m 600 /etc/cybergau/env /opt/cybergau/.env
   # shellcheck disable=SC1090
   set -a; source /etc/cybergau/env; set +a
   systemctl restart cybergau.service
 
+  cybergau_step "acceptance: keys, nginx, wings, ServerSlot, plugin.zip"
   if ! grep -q '^PTERODACTYL_APP_KEY=.\+' /etc/cybergau/env || ! grep -q '^PTERODACTYL_CLIENT_KEY=.\+' /etc/cybergau/env; then
     echo "Ключи PTERODACTYL_APP_KEY / PTERODACTYL_CLIENT_KEY пусты в /etc/cybergau/env"
     exit 1
   fi
   if ! systemctl is-active --quiet nginx; then
     echo "nginx не активен после установки панели"
+    systemctl status nginx --no-pager -l || true
     exit 1
   fi
   if ! systemctl is-active --quiet wings; then
     echo "wings не активен после установки панели"
     systemctl status wings --no-pager -l || true
+    journalctl -u wings -n 40 --no-pager || true
     exit 1
   fi
 
@@ -175,6 +186,7 @@ if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
   slots=0
   plugin_ok=0
   for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    echo "acceptance attempt ${attempt}/12 (slots=${slots:-0} plugin=${plugin_ok})"
     if curl -sf --max-time 5 "${WEB}/backend/health" >/dev/null 2>&1 \
       || docker exec cybergau-api-1 wget -q -O /dev/null http://127.0.0.1:4000/health 2>/dev/null; then
       slots="$(docker exec cybergau-postgres-1 psql -U "${POSTGRES_USER:-cybergau}" -d "${POSTGRES_DB:-cybergau}" -Atc \
@@ -194,6 +206,8 @@ if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
   if [[ "$ok" != "1" ]]; then
     echo "Панель/пул/скины не готовы после install (free ServerSlot=${slots:-0}, plugin.zip ok=${plugin_ok})."
     echo "Проверьте: systemctl status nginx wings; ключи PTERODACTYL_* в /etc/cybergau/env; ${WEB}/backend/skins/plugin.zip"
+    docker ps -a --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || true
+    docker logs cybergau-api-1 --tail 40 2>&1 || true
     exit 1
   fi
   echo "Игровой пул готов: ${slots} свободный слот(ов); скинченджер: ${WEB}/backend/skins/plugin.zip"

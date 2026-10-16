@@ -7,6 +7,11 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$HERE/install-log.sh"
+cybergau_step "pterodactyl.sh start"
+
 ENV_FILE=/etc/cybergau/env
 set -a
 # shellcheck disable=SC1090
@@ -25,6 +30,7 @@ export COMPOSER_PROCESS_TIMEOUT=0
 : "${PANEL_FQDN:?}"
 : "${ALLOC_IP:?}"
 
+cybergau_step "apt: nginx mariadb redis php"
 apt-get update
 apt-get install -y \
   nginx mariadb-server redis-server tar unzip git curl jq \
@@ -32,6 +38,7 @@ apt-get install -y \
   php8.3-bcmath php8.3-xml php8.3-curl php8.3-zip php8.3-intl php8.3-redis
 
 if ! command -v composer >/dev/null 2>&1; then
+  cybergau_step "install composer"
   # Pipe to php can hang on flaky TLS; download to a file with timeouts/retries.
   curl -fsSL --connect-timeout 15 --max-time 120 --retry 5 --retry-delay 2 \
     -o /tmp/composer-setup.php https://getcomposer.org/installer
@@ -39,6 +46,7 @@ if ! command -v composer >/dev/null 2>&1; then
   rm -f /tmp/composer-setup.php
 fi
 
+cybergau_step "mariadb panel database"
 mysql -e "CREATE DATABASE IF NOT EXISTS panel;"
 mysql -e "CREATE USER IF NOT EXISTS 'pterodactyl'@'127.0.0.1' IDENTIFIED BY '${PANEL_DB_PASSWORD}';"
 mysql -e "GRANT ALL PRIVILEGES ON panel.* TO 'pterodactyl'@'127.0.0.1' WITH GRANT OPTION;"
@@ -46,6 +54,7 @@ mysql -e "FLUSH PRIVILEGES;"
 
 PANEL_DIR=/var/www/pterodactyl
 if [[ ! -f "$PANEL_DIR/.env" ]] || ! grep -q '^APP_KEY=base64:' "$PANEL_DIR/.env"; then
+  cybergau_step "download + composer install panel"
   mkdir -p "$PANEL_DIR"
   cd "$PANEL_DIR"
   curl -fsSL --connect-timeout 15 --max-time 300 --retry 5 --retry-delay 2 \
@@ -290,6 +299,7 @@ fi
 POOL="${POOL_SIZE:-1}"
 EXISTING="$(curl -sf "${AUTH[@]}" "$BASE/api/application/servers?per_page=100" | jq -r '[.data[].attributes.name | select(startswith("cybergau-"))] | length')"
 NEED=$((POOL - EXISTING))
+cybergau_step "CS2 pool: existing=${EXISTING} need=${NEED} (POOL_SIZE=${POOL})"
 if [[ "$NEED" -gt 0 ]]; then
   EGG_JSON=/opt/cybergau/deploy/eggs/counter-strike-2.json
   mkdir -p /var/lib/cybergau
@@ -297,6 +307,7 @@ if [[ "$NEED" -gt 0 ]]; then
     echo "Нет шаблона CS2: $EGG_JSON"
     exit 1
   fi
+  cybergau_step "nest cyberGAU + import egg"
   NEST_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests?per_page=100" \
     | jq -r '.data[] | select(.attributes.name == "cyberGAU") | .attributes.id' | head -n1)"
   if [[ -z "$NEST_ID" ]]; then
@@ -381,6 +392,7 @@ if [[ "$NEED" -gt 0 ]]; then
       + (if ($gslt | length) > 0 then {STEAM_GSLT: $gslt} else {} end)
     ')"
     SLOT_NAME="cybergau-$((EXISTING + i))"
+    cybergau_step "create server ${SLOT_NAME} (alloc=${ALLOC} disk=${WANT_DISK}MB egg=${EGG_ID})"
     CREATE_BODY="$(jq -nc \
       --arg name "$SLOT_NAME" \
       --argjson user "$USER_ID" \
