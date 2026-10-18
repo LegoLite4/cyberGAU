@@ -484,14 +484,52 @@ if [[ "$NEED" -gt 0 ]]; then
     fi
     rm -f "$CREATE_RESP"
   done
-  # Attach shared mount to newly created servers.
+fi
+
+# Create starts install immediately; Application API often ignores mounts[] on create.
+# Attach /cs2-base, then reinstall any pool slot whose volume still lacks cs2.
+cybergau_step "attach CS2 mount + reinstall empty pool volumes"
+MOUNT_ID="$(
+  cd "$PANEL_DIR" && \
   env -u DATABASE_URL \
     PANEL_DIR="$PANEL_DIR" \
     EGG_ID="$EGG_ID" \
     NODE_ID="$NODE_ID" \
     CS2_BASE_DIR="$CS2_BASE_DIR" \
-    php /opt/cybergau/deploy/ensure-cs2-mount.php >/dev/null
-fi
+    php /opt/cybergau/deploy/ensure-cs2-mount.php
+)"
+MOUNT_ID="$(echo "$MOUNT_ID" | tr -d '[:space:]')"
+cd "$PANEL_DIR" && \
+  env -u DATABASE_URL \
+    PANEL_DIR="$PANEL_DIR" \
+    EGG_ID="$EGG_ID" \
+    MOUNT_ID="$MOUNT_ID" \
+    php /opt/cybergau/deploy/ensure-pool-install.php
+
+# Wait until every cybergau-* volume has the hardlinked binary (or timeout).
+VOLUMES_DIR="${VOLUMES_DIR:-/var/lib/pterodactyl/volumes}"
+WAIT_SECS="${CS2_INSTALL_WAIT_SECS:-600}"
+DEADLINE=$((SECONDS + WAIT_SECS))
+while true; do
+  MISSING=0
+  while IFS= read -r UUID; do
+    [[ -z "$UUID" ]] && continue
+    if [[ ! -x "${VOLUMES_DIR}/${UUID}/game/bin/linuxsteamrt64/cs2" ]]; then
+      MISSING=$((MISSING + 1))
+    fi
+  done < <(curl -sf "${AUTH[@]}" "$BASE/api/application/servers?per_page=100" \
+    | jq -r '.data[] | select(.attributes.name | startswith("cybergau-")) | .attributes.uuid')
+  if [[ "$MISSING" -eq 0 ]]; then
+    echo "Все слоты cybergau-* имеют cs2 в volume"
+    break
+  fi
+  if [[ "$SECONDS" -ge "$DEADLINE" ]]; then
+    echo "Таймаут: ${MISSING} слот(ов) всё ещё без cs2 после ${WAIT_SECS}s (mount/install)"
+    exit 1
+  fi
+  echo "Жду hardlink install: ещё без cs2 = ${MISSING}"
+  sleep 5
+done
 
 FINAL_COUNT="$(curl -sf "${AUTH[@]}" "$BASE/api/application/servers?per_page=100" | jq -r '[.data[].attributes.name | select(startswith("cybergau-"))] | length')"
 if [[ "${FINAL_COUNT:-0}" -lt "$POOL" ]]; then
