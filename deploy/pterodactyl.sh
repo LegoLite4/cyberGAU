@@ -255,6 +255,23 @@ docker:
 EOF
 fi
 
+# Shared CS2 base for all pool slots (hardlinked from egg install script).
+CS2_BASE_DIR="${CS2_BASE_DIR:-/var/lib/cybergau/cs2-base}"
+mkdir -p "$CS2_BASE_DIR"
+if ! grep -q '^allowed_mounts:' /etc/pterodactyl/config.yml; then
+  printf '\n%s\n%s\n' 'allowed_mounts:' "  - ${CS2_BASE_DIR}" >>/etc/pterodactyl/config.yml
+elif ! grep -qF "$CS2_BASE_DIR" /etc/pterodactyl/config.yml; then
+  # Insert path under existing allowed_mounts list.
+  awk -v path="$CS2_BASE_DIR" '
+    BEGIN { done=0 }
+    /^allowed_mounts:/ { print; print "  - " path; done=1; next }
+    { print }
+    END { if (!done) { print "allowed_mounts:"; print "  - " path } }
+  ' /etc/pterodactyl/config.yml > /etc/pterodactyl/config.yml.tmp
+  mv /etc/pterodactyl/config.yml.tmp /etc/pterodactyl/config.yml
+fi
+chmod 600 /etc/pterodactyl/config.yml
+
 cat > /etc/systemd/system/wings.service <<'EOF'
 [Unit]
 Description=Pterodactyl Wings
@@ -286,6 +303,9 @@ fi
 
 systemctl enable --now nginx
 systemctl enable --now wings
+# Reload Wings so allowed_mounts for shared CS2 base is applied.
+systemctl restart wings
+sleep 2
 if ! systemctl is-active --quiet nginx; then
   echo "nginx не активен после установки панели"
   exit 1
@@ -296,67 +316,83 @@ if ! systemctl is-active --quiet wings; then
   exit 1
 fi
 
+EGG_JSON=/opt/cybergau/deploy/eggs/counter-strike-2.json
+mkdir -p /var/lib/cybergau
+if [[ ! -s "$EGG_JSON" ]]; then
+  echo "Нет шаблона CS2: $EGG_JSON"
+  exit 1
+fi
+if [[ ! -x "${CS2_BASE_DIR}/game/bin/linuxsteamrt64/cs2" ]]; then
+  echo "Нет общей базы CS2 в ${CS2_BASE_DIR} — сначала: sudo bash /opt/cybergau/deploy/build-cs2-base.sh"
+  exit 1
+fi
+
+cybergau_step "nest cyberGAU + import egg"
+# POST /api/application/nests больше не поддерживается панелью (405 Method Not Allowed).
+NEST_ID="$(
+  cd "$PANEL_DIR" && \
+  env -u DATABASE_URL \
+    PANEL_DIR="$PANEL_DIR" \
+    NEST_NAME=cyberGAU \
+    NEST_DESCRIPTION='CS2 pool' \
+    NEST_AUTHOR="${ADMIN_EMAIL:-admin@cybergau.local}" \
+    php /opt/cybergau/deploy/ensure-nest.php
+)"
+NEST_ID="$(echo "$NEST_ID" | tr -d '[:space:]')"
+if [[ -z "$NEST_ID" || ! "$NEST_ID" =~ ^[0-9]+$ ]]; then
+  echo "Не удалось создать nest cyberGAU для CS2 (NEST_ID='${NEST_ID}')"
+  exit 1
+fi
+echo "NEST_ID=${NEST_ID}"
+EGG_ID="$(
+  cd "$PANEL_DIR" && \
+  env -u DATABASE_URL \
+    PANEL_DIR="$PANEL_DIR" \
+    NEST_ID="$NEST_ID" \
+    EGG_PATH="$EGG_JSON" \
+    php /opt/cybergau/deploy/import-egg.php
+)"
+EGG_ID="$(echo "$EGG_ID" | tr -d '[:space:]')"
+if [[ -z "$EGG_ID" || ! "$EGG_ID" =~ ^[0-9]+$ ]]; then
+  echo "Egg CS2 не импортирован (EGG_ID='${EGG_ID}')"
+  exit 1
+fi
+echo "EGG_ID=${EGG_ID}"
+
+cybergau_step "panel mount shared CS2 base → /cs2-base"
+MOUNT_ID="$(
+  cd "$PANEL_DIR" && \
+  env -u DATABASE_URL \
+    PANEL_DIR="$PANEL_DIR" \
+    EGG_ID="$EGG_ID" \
+    NODE_ID="$NODE_ID" \
+    CS2_BASE_DIR="$CS2_BASE_DIR" \
+    php /opt/cybergau/deploy/ensure-cs2-mount.php
+)"
+MOUNT_ID="$(echo "$MOUNT_ID" | tr -d '[:space:]')"
+if [[ -z "$MOUNT_ID" || ! "$MOUNT_ID" =~ ^[0-9]+$ ]]; then
+  echo "Не удалось создать Mount для shared CS2 (MOUNT_ID='${MOUNT_ID}')"
+  exit 1
+fi
+echo "MOUNT_ID=${MOUNT_ID}"
+
 POOL="${POOL_SIZE:-1}"
 EXISTING="$(curl -sf "${AUTH[@]}" "$BASE/api/application/servers?per_page=100" | jq -r '[.data[].attributes.name | select(startswith("cybergau-"))] | length')"
 NEED=$((POOL - EXISTING))
 cybergau_step "CS2 pool: existing=${EXISTING} need=${NEED} (POOL_SIZE=${POOL})"
+
+# Slot volume holds cfg/logs/demos only; the game lives in /var/lib/cybergau/cs2-base.
+WANT_DISK="${CS2_DISK_MB:-8192}"
+NODE_DISK_MB="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nodes/${NODE_ID}" | jq -r '.attributes.disk // 0')"
+if [[ "${NODE_DISK_MB:-0}" -gt 0 ]]; then
+  MAX_DISK=$((NODE_DISK_MB * 90 / 100))
+  if [[ "$WANT_DISK" -gt "$MAX_DISK" ]]; then
+    echo "CS2_DISK_MB=${WANT_DISK} больше диска ноды (${NODE_DISK_MB} MB) — урезаю до ${MAX_DISK}"
+    WANT_DISK="$MAX_DISK"
+  fi
+fi
+
 if [[ "$NEED" -gt 0 ]]; then
-  EGG_JSON=/opt/cybergau/deploy/eggs/counter-strike-2.json
-  mkdir -p /var/lib/cybergau
-  if [[ ! -s "$EGG_JSON" ]]; then
-    echo "Нет шаблона CS2: $EGG_JSON"
-    exit 1
-  fi
-  cybergau_step "nest cyberGAU + import egg"
-  # POST /api/application/nests больше не поддерживается панелью (405 Method Not Allowed).
-  # DATABASE_URL из /etc/cybergau/env указывает на Postgres cyberGAU — для Panel его нельзя оставлять.
-  NEST_ID="$(
-    cd "$PANEL_DIR" && \
-    env -u DATABASE_URL \
-      PANEL_DIR="$PANEL_DIR" \
-      NEST_NAME=cyberGAU \
-      NEST_DESCRIPTION='CS2 pool' \
-      NEST_AUTHOR="${ADMIN_EMAIL:-admin@cybergau.local}" \
-      php /opt/cybergau/deploy/ensure-nest.php
-  )"
-  NEST_ID="$(echo "$NEST_ID" | tr -d '[:space:]')"
-  if [[ -z "$NEST_ID" || ! "$NEST_ID" =~ ^[0-9]+$ ]]; then
-    echo "Не удалось создать nest cyberGAU для CS2 (NEST_ID='${NEST_ID}')"
-    exit 1
-  fi
-  echo "NEST_ID=${NEST_ID}"
-  EGG_ID="$(
-    cd "$PANEL_DIR" && \
-    env -u DATABASE_URL \
-      PANEL_DIR="$PANEL_DIR" \
-      NEST_ID="$NEST_ID" \
-      EGG_PATH="$EGG_JSON" \
-      php /opt/cybergau/deploy/import-egg.php
-  )"
-  EGG_ID="$(echo "$EGG_ID" | tr -d '[:space:]')"
-  if [[ -z "$EGG_ID" || ! "$EGG_ID" =~ ^[0-9]+$ ]]; then
-    echo "Egg CS2 не импортирован (EGG_ID='${EGG_ID}')"
-    exit 1
-  fi
-  echo "EGG_ID=${EGG_ID}"
-
-  NODE_DISK_MB="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nodes/${NODE_ID}" | jq -r '.attributes.disk // 0')"
-  WANT_DISK="${CS2_DISK_MB:-90000}"
-  if [[ "${NODE_DISK_MB:-0}" -gt 0 ]]; then
-    # Leave ~10% headroom on the node for panel/OS/other use.
-    MAX_DISK=$((NODE_DISK_MB * 90 / 100))
-    if [[ "$MAX_DISK" -lt 20000 ]]; then
-      MAX_DISK="$NODE_DISK_MB"
-    fi
-    if [[ "$WANT_DISK" -gt "$MAX_DISK" ]]; then
-      echo "CS2_DISK_MB=${WANT_DISK} больше диска ноды (${NODE_DISK_MB} MB) — урезаю до ${MAX_DISK}"
-      WANT_DISK="$MAX_DISK"
-    fi
-  fi
-  if [[ "$WANT_DISK" -lt 20000 ]]; then
-    echo "Предупреждение: диск слота ${WANT_DISK} MB — CS2 может не установиться (нужно десятки GB)"
-  fi
-
   RCON_PASSWORD="$(openssl rand -hex 8)"
   find_alloc() {
     local port="$1"
@@ -394,7 +430,7 @@ if [[ "$NEED" -gt 0 ]]; then
         SRCDS_MAP: "de_dust2",
         SRCDS_APPID: "730",
         MAX_PLAYERS: "16",
-        AUTO_UPDATE: "1",
+        AUTO_UPDATE: "0",
         TV_PORT: "27020",
         VAC_ENABLED: "0",
         RCON_ENABLED: "0",
@@ -421,6 +457,7 @@ if [[ "$NEED" -gt 0 ]]; then
       --argjson disk "$WANT_DISK" \
       --argjson cpu "${CS2_CPU:-200}" \
       --argjson alloc "$ALLOC" \
+      --argjson mount "$MOUNT_ID" \
       '{
         name: $name,
         user: $user,
@@ -431,6 +468,7 @@ if [[ "$NEED" -gt 0 ]]; then
         limits: {memory: $memory, swap: 0, disk: $disk, io: 500, cpu: $cpu},
         feature_limits: {databases: 0, allocations: 0, backups: 0},
         allocation: {default: $alloc},
+        mounts: [$mount],
         start_on_completion: false
       }')"
     CREATE_RESP="$(mktemp)"
@@ -443,6 +481,13 @@ if [[ "$NEED" -gt 0 ]]; then
     fi
     rm -f "$CREATE_RESP"
   done
+  # Attach shared mount to newly created servers.
+  env -u DATABASE_URL \
+    PANEL_DIR="$PANEL_DIR" \
+    EGG_ID="$EGG_ID" \
+    NODE_ID="$NODE_ID" \
+    CS2_BASE_DIR="$CS2_BASE_DIR" \
+    php /opt/cybergau/deploy/ensure-cs2-mount.php >/dev/null
 fi
 
 FINAL_COUNT="$(curl -sf "${AUTH[@]}" "$BASE/api/application/servers?per_page=100" | jq -r '[.data[].attributes.name | select(startswith("cybergau-"))] | length')"

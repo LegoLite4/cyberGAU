@@ -40,6 +40,13 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 export HOME="${HOME:-/root}"
 export COMPOSER_HOME="${COMPOSER_HOME:-/root/.composer}"
+
+# After Proxmox disk enlarge/clone, use the full virtual disk before downloads.
+if [[ -f "$HERE/grow-root-disk.sh" ]]; then
+  cybergau_step "grow-root-disk.sh"
+  bash "$HERE/grow-root-disk.sh" || echo "grow-root-disk: продолжаю без расширения"
+fi
+
 apt-get update
 apt-get install -y ca-certificates curl git rsync docker.io qemu-guest-agent
 if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
@@ -73,8 +80,10 @@ fi
 
 # Некоторые роутеры анонсируют IPv6, но не выпускают его в интернет.
 # Docker Hub тогда зависает на AAAA-записях. Если реестр по IPv6 недоступен, выключаем IPv6.
-hub_v6="$(timeout 8 curl -6 -sS -o /dev/null --max-time 5 -w '%{http_code}' https://registry-1.docker.io/v2/ || true)"
+# stderr в /dev/null: ожидаемый fail иначе шумит в лог как curl: (7).
+hub_v6="$(timeout 8 curl -6 -sS -o /dev/null --max-time 5 -w '%{http_code}' https://registry-1.docker.io/v2/ 2>/dev/null || true)"
 if [[ "$hub_v6" != "200" && "$hub_v6" != "401" ]]; then
+  echo "IPv6 Docker Hub probe failed (code=${hub_v6:-none}) — disabling IPv6"
   sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
   sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null
   printf '%s\n' 'net.ipv6.conf.all.disable_ipv6=1' 'net.ipv6.conf.default.disable_ipv6=1' >/etc/sysctl.d/99-cybergau-ipv6.conf
@@ -159,6 +168,12 @@ WEB="${WEB%/}"
 # Плагин скинов нужен и сайту (/backend/skins/plugin.zip), и CS2 egg при установке слота.
 cybergau_step "build-skinchanger.sh"
 bash /opt/cybergau/deploy/build-skinchanger.sh
+
+# Одна общая установка CS2 для всех слотов (hardlink из /var/lib/cybergau/cs2-base).
+if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
+  cybergau_step "build-cs2-base.sh (shared Steam install)"
+  bash /opt/cybergau/deploy/build-cs2-base.sh
+fi
 
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
   cybergau_step "pterodactyl.sh (panel + wings + CS2 pool)"

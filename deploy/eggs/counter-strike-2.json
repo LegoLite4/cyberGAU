@@ -60,7 +60,7 @@
       "name": "Auto Update",
       "description": "Update on boot",
       "env_variable": "AUTO_UPDATE",
-      "default_value": "1",
+      "default_value": "0",
       "user_viewable": true,
       "user_editable": true,
       "rules": "required|boolean",

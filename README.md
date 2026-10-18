@@ -26,6 +26,10 @@ curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.
 
 `get.sh` кладёт код в `/opt/cybergau`, пишет `/etc/cybergau/env` (пароли и IP с основного интерфейса: 192.168.x / 10.x / …), ставит Docker, сайт, API, PostgreSQL, `cybergau.service`, панель Pterodactyl и пул CS2. По умолчанию `CYBERGAU_ACCESS=lan`. Переопределения: `CYBERGAU_ACCESS=wireguard`, `STEAM_WEB_API_KEY=...`, `WG_ENDPOINT=ip:51820`, `POOL_SIZE=1`, `FORCE_ENV=1`.
 
+Игра CS2 качается один раз в `/var/lib/cybergau/cs2-base` (~50–60 GB); слоты пула делают hardlink-копию и не гоняют SteamCMD заново. На диске для базы нужно ≥70 GB свободно; при готовой базе 4 слота укладываются примерно в ~100 GB суммарно (база + мелкие cfg/logs на слот). Обновить игру: `sudo FORCE_CS2_BASE=1 bash /opt/cybergau/deploy/build-cs2-base.sh`.
+
+После увеличения диска в Proxmox или клона VM раздел Ubuntu часто остаётся старого размера. Установщик сам расширяет корень (`deploy/grow-root-disk.sh`); вручную: `sudo bash /opt/cybergau/deploy/grow-root-disk.sh`.
+
 После перезагрузки сами стартуют Docker, `cybergau.service`, `pteroq`, `wings`; при wireguard ещё `wg-quick@wg0`.
 
 Обновление на сервере: `sudo bash /opt/cybergau/deploy/update.sh`.
@@ -50,4 +54,4 @@ docker compose --env-file .env up -d --build
 
 ## Тестовая VM
 
-Проверка Proxmox: свежая VM с Ubuntu — одна команда-установщик выше (`POOL_SIZE=1`). Адреса возьмутся с LAN машины. На 8 ГБ держите один слот CS2.
+Проверка Proxmox: свежая VM с Ubuntu — одна команда-установщик выше (`POOL_SIZE=1`). Адреса возьмутся с LAN машины. Для полного CS2 пула нужен диск под общую базу (`/var/lib/cybergau/cs2-base`); лимит диска слота (`CS2_DISK_MB`, по умолчанию 8192) — только cfg/logs/demos.

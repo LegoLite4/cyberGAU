@@ -1,65 +1,78 @@
 #!/bin/bash
+# Slot install: hardlink shared CS2 base from /cs2-base (Wings mount).
+# Game is downloaded once on the host by deploy/build-cs2-base.sh — not per slot.
 set -euo pipefail
-if [[ "${STEAM_USER:-}" == "" ]]; then
-  STEAM_USER=anonymous
-  STEAM_PASS=""
-  STEAM_AUTH=""
-fi
-cd /tmp
-mkdir -p /mnt/server/steamcmd
-curl -fsSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-tar -xzf steamcmd.tar.gz -C /mnt/server/steamcmd
-mkdir -p /mnt/server/steamapps
-cd /mnt/server/steamcmd
-chown -R root:root /mnt
-export HOME=/mnt/server
-./steamcmd.sh +force_install_dir /mnt/server +login ${STEAM_USER} ${STEAM_PASS} ${STEAM_AUTH} +app_update ${SRCDS_APPID} validate +quit
-mkdir -p /mnt/server/.steam/sdk32 /mnt/server/.steam/sdk64
-cp -v linux32/steamclient.so /mnt/server/.steam/sdk32/steamclient.so
-cp -v linux64/steamclient.so /mnt/server/.steam/sdk64/steamclient.so
 
-CSGO=/mnt/server/game/csgo
-mkdir -p "$CSGO"
-if ! command -v unzip >/dev/null 2>&1; then
-  apt-get update
-  apt-get install -y unzip
+SHARED="${CS2_SHARED_ROOT:-/cs2-base}"
+CS2_BIN_SHARED="$SHARED/game/bin/linuxsteamrt64/cs2"
+
+if [[ ! -x "$CS2_BIN_SHARED" ]]; then
+  echo "Shared CS2 base not mounted or incomplete: missing $CS2_BIN_SHARED"
+  echo "On the host run: sudo bash /opt/cybergau/deploy/build-cs2-base.sh"
+  echo "Then ensure Wings allowed_mounts + Panel mount → /cs2-base"
+  exit 1
 fi
-curl -fsSL -o /tmp/metamod.tar.gz "https://mms.alliedmods.net/mmsdrop/2.0/mmsource-2.0.0-git1472-linux.tar.gz"
-tar -xzf /tmp/metamod.tar.gz -C "$CSGO"
-curl -fsSL -o /tmp/css.zip "https://github.com/roflmuffin/CounterStrikeSharp/releases/download/v1.0.375/counterstrikesharp-with-runtime-linux-1.0.375.zip"
-unzip -o /tmp/css.zip -d "$CSGO"
-mkdir -p "$CSGO/addons/counterstrikesharp/configs"
-cat > "$CSGO/addons/counterstrikesharp/configs/core.json" <<'EOF'
-{
-  "PublicChatTrigger": ["!"],
-  "SilentChatTrigger": ["/"],
-  "FollowCS2ServerGuidelines": false,
-  "PluginHotReloadEnabled": false,
-  "PluginAutoLoadEnabled": true,
-  "PluginResolveNugetPackages": false,
-  "ServerLanguage": "en",
-  "UnlockConCommands": true,
-  "UnlockConVars": true,
-  "AutoUpdateEnabled": false,
-  "AutoUpdateURL": "http://gamedata.cssharp.dev",
-  "MaximumFrameTasksExecutedPerTick": 1024
+
+# Clear slot volume contents ( /mnt/server is a bind-mount — do not remove the mountpoint ).
+find /mnt/server -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+# Hardlink tree (same host FS via Wings binds of base + volume).
+if ! cp -al "$SHARED"/. /mnt/server/; then
+  echo "cp -al failed (filesystem must support hardlinks between /cs2-base and the slot volume)"
+  exit 1
+fi
+
+# Per-slot writable trees (break hardlinks so instances do not share cfg/logs writes).
+unlink_copy() {
+  local rel="$1"
+  local src="/mnt/server/${rel}"
+  local shared_src="${SHARED}/${rel}"
+  if [[ -e "$src" || -L "$src" ]]; then
+    rm -rf "$src"
+  fi
+  if [[ -e "$shared_src" ]]; then
+    mkdir -p "$(dirname "$src")"
+    cp -a "$shared_src" "$src"
+  else
+    mkdir -p "$src"
+  fi
 }
-EOF
-GAMEINFO="$CSGO/gameinfo.gi"
-if [[ -f "$GAMEINFO" ]] && ! grep -q "addons/metamod" "$GAMEINFO"; then
-  awk 'BEGIN{done=0} { if (done==0 && $0 ~ /Game[[:space:]]+csgo[[:space:]]*$/) { print "\t\t\tGame\tcsgo/addons/metamod"; done=1 } print }' "$GAMEINFO" > "$GAMEINFO.new"
-  mv "$GAMEINFO.new" "$GAMEINFO"
-fi
-# Panel/slot env must set these (pterodactyl.sh uses PUBLIC_WEB_URL). Fallback: docker bridge → host.
+
+unlink_copy "game/csgo/cfg"
+unlink_copy "game/csgo/logs"
+unlink_copy "game/csgo/addons/counterstrikesharp/configs"
+# Skin plugin config is per-slot (ApiBase may differ); keep DLL hardlinked, replace config only.
+SKIN_CFG="/mnt/server/game/csgo/addons/counterstrikesharp/plugins/CybergauSkins/config.json"
+mkdir -p "$(dirname "$SKIN_CFG")"
+
 SKIN_API_BASE="${SKIN_API_BASE:-http://172.17.0.1:3000/backend}"
-SKIN_PLUGIN_URL="${SKIN_PLUGIN_URL:-${SKIN_API_BASE%/}/skins/plugin.zip}"
+SKIN_API_BASE="${SKIN_API_BASE%/}"
+SKIN_API_BASE="${SKIN_API_BASE%/backend}/backend"
+SKIN_PLUGIN_URL="${SKIN_PLUGIN_URL:-${SKIN_API_BASE}/skins/plugin.zip}"
 if [[ -z "$SKIN_PLUGIN_URL" || "$SKIN_PLUGIN_URL" == *10.77.0.1* ]]; then
   echo "SKIN_PLUGIN_URL must point to cyberGAU API (.../backend/skins/plugin.zip), got: ${SKIN_PLUGIN_URL:-empty}"
   exit 1
 fi
-mkdir -p "$CSGO/addons/counterstrikesharp/plugins"
-curl -fsSL -o /tmp/cybergau-skins.zip "$SKIN_PLUGIN_URL"
-unzip -o /tmp/cybergau-skins.zip -d "$CSGO/addons/counterstrikesharp/plugins"
-printf '%s\n' "{\"ApiBase\":\"${SKIN_API_BASE}\"}" > "$CSGO/addons/counterstrikesharp/plugins/CybergauSkins/config.json"
-test -f "$CSGO/addons/counterstrikesharp/plugins/CybergauSkins/CybergauSkins.dll"
-echo "cyberGAU skinchanger installed"
+
+# Refresh skins from API if present; otherwise keep hardlinked copy from base.
+if command -v unzip >/dev/null 2>&1 || apt-get update >/dev/null 2>&1; then
+  if ! command -v unzip >/dev/null 2>&1; then
+    apt-get install -y unzip >/dev/null
+  fi
+fi
+if curl -fsSL --connect-timeout 10 --max-time 60 -o /tmp/cybergau-skins.zip "$SKIN_PLUGIN_URL"; then
+  mkdir -p /mnt/server/game/csgo/addons/counterstrikesharp/plugins
+  # Replace plugin dir with a real copy so zip extract does not touch shared inodes incorrectly.
+  rm -rf /mnt/server/game/csgo/addons/counterstrikesharp/plugins/CybergauSkins
+  unzip -o /tmp/cybergau-skins.zip -d /mnt/server/game/csgo/addons/counterstrikesharp/plugins
+  rm -f /tmp/cybergau-skins.zip
+fi
+printf '%s\n' "{\"ApiBase\":\"${SKIN_API_BASE}\"}" > "$SKIN_CFG"
+test -f /mnt/server/game/csgo/addons/counterstrikesharp/plugins/CybergauSkins/CybergauSkins.dll
+
+CS2_BIN="/mnt/server/game/bin/linuxsteamrt64/cs2"
+if [[ ! -x "$CS2_BIN" ]]; then
+  echo "Slot volume missing CS2 binary after hardlink: $CS2_BIN"
+  exit 1
+fi
+
+echo "cyberGAU slot linked to shared CS2 base (hardlinks); skins ApiBase=${SKIN_API_BASE}"
