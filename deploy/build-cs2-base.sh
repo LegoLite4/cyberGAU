@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Одна общая установка CS2 для всех слотов пула: /var/lib/cybergau/cs2-base
-# Слоты делают hardlink (см. eggs/cs2-install.sh), Steam не качается на каждый инстанс.
+# Слоты hardlink'ает хост (deploy/link-cs2-slot.sh) — mounts недоступны в Wings install.
 set -euo pipefail
 
 if [[ "$(id -u)" -ne 0 ]]; then
