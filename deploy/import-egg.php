@@ -1,5 +1,9 @@
 <?php
 
+// cyberGAU env exports DATABASE_URL for Postgres — unset so Panel uses MariaDB.
+putenv('DATABASE_URL');
+unset($_ENV['DATABASE_URL'], $_SERVER['DATABASE_URL']);
+
 $panel = getenv('PANEL_DIR') ?: '/var/www/pterodactyl';
 require $panel . '/vendor/autoload.php';
 $app = require $panel . '/bootstrap/app.php';

@@ -156,6 +156,10 @@ fi
 WEB="${PUBLIC_WEB_URL:-http://127.0.0.1:3000}"
 WEB="${WEB%/}"
 
+# Плагин скинов нужен и сайту (/backend/skins/plugin.zip), и CS2 egg при установке слота.
+cybergau_step "build-skinchanger.sh"
+bash /opt/cybergau/deploy/build-skinchanger.sh
+
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
   cybergau_step "pterodactyl.sh (panel + wings + CS2 pool)"
   bash /opt/cybergau/deploy/pterodactyl.sh

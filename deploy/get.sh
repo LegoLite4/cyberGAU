@@ -47,6 +47,16 @@ fi' EXIT
 
 log "======== cyberGAU get.sh $(date -Is) branch=${BRANCH} ========"
 
+# Ждём чужой apt/dpkg (параллельный get.sh / unattended-upgrades).
+for _lock_wait in $(seq 1 60); do
+  if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+    && ! fuser /var/lib/dpkg/lock >/dev/null 2>&1; then
+    break
+  fi
+  log "Жду освобождения apt/dpkg lock (${_lock_wait}/60)..."
+  sleep 5
+done
+
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl git openssl >/dev/null
 

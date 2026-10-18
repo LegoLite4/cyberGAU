@@ -109,10 +109,12 @@ fi
 
 chown -R www-data:www-data "$PANEL_DIR"
 
+# Слушаем 0.0.0.0, чтобы локальные curl на 127.0.0.1 и клиенты по LAN-IP
+# одинаково достучались до панели (раньше BIND_ADDR=LAN ломал API по localhost).
 cat > /etc/nginx/sites-available/pterodactyl.conf <<EOF
 server {
-    listen ${BIND_ADDR:-0.0.0.0}:${PANEL_PORT:-8088};
-    server_name ${PANEL_FQDN};
+    listen 0.0.0.0:${PANEL_PORT:-8088};
+    server_name ${PANEL_FQDN} localhost 127.0.0.1;
     root ${PANEL_DIR}/public;
     index index.php;
     client_max_body_size 100m;
@@ -214,11 +216,8 @@ upsert_env PTERODACTYL_CLIENT_KEY "$CLIENT_KEY"
 bash /opt/cybergau/deploy/apply-env.sh
 
 AUTH=(-H "Authorization: Bearer ${APP_KEY}" -H "Accept: Application/vnd.pterodactyl.v1+json" -H "Content-Type: application/json")
-PANEL_HTTP_HOST="${BIND_ADDR:-127.0.0.1}"
-if [[ "$PANEL_HTTP_HOST" == "0.0.0.0" || "$PANEL_HTTP_HOST" == "::" ]]; then
-  PANEL_HTTP_HOST=127.0.0.1
-fi
-BASE="http://${PANEL_HTTP_HOST}:${PANEL_PORT:-8088}"
+# Всегда localhost: nginx слушает 0.0.0.0, а BIND_ADDR может быть только LAN-IP.
+BASE="http://127.0.0.1:${PANEL_PORT:-8088}"
 
 LOC_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/locations" | jq -r '.data[0].attributes.id // empty')"
 if [[ -z "$LOC_ID" ]]; then
@@ -309,20 +308,37 @@ if [[ "$NEED" -gt 0 ]]; then
     exit 1
   fi
   cybergau_step "nest cyberGAU + import egg"
-  NEST_ID="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nests?per_page=100" \
-    | jq -r '.data[] | select(.attributes.name == "cyberGAU") | .attributes.id' | head -n1)"
-  if [[ -z "$NEST_ID" ]]; then
-    NEST_ID="$(curl -sf "${AUTH[@]}" -d '{"name":"cyberGAU","description":"CS2 pool"}' "$BASE/api/application/nests" | jq -r '.attributes.id // empty')"
-  fi
-  if [[ -z "$NEST_ID" ]]; then
-    echo "Не удалось создать nest cyberGAU для CS2"
+  # POST /api/application/nests больше не поддерживается панелью (405 Method Not Allowed).
+  # DATABASE_URL из /etc/cybergau/env указывает на Postgres cyberGAU — для Panel его нельзя оставлять.
+  NEST_ID="$(
+    cd "$PANEL_DIR" && \
+    env -u DATABASE_URL \
+      PANEL_DIR="$PANEL_DIR" \
+      NEST_NAME=cyberGAU \
+      NEST_DESCRIPTION='CS2 pool' \
+      NEST_AUTHOR="${ADMIN_EMAIL:-admin@cybergau.local}" \
+      php /opt/cybergau/deploy/ensure-nest.php
+  )"
+  NEST_ID="$(echo "$NEST_ID" | tr -d '[:space:]')"
+  if [[ -z "$NEST_ID" || ! "$NEST_ID" =~ ^[0-9]+$ ]]; then
+    echo "Не удалось создать nest cyberGAU для CS2 (NEST_ID='${NEST_ID}')"
     exit 1
   fi
-  EGG_ID="$(cd "$PANEL_DIR" && PANEL_DIR="$PANEL_DIR" NEST_ID="$NEST_ID" EGG_PATH="$EGG_JSON" php /opt/cybergau/deploy/import-egg.php)"
-  if [[ -z "$EGG_ID" ]]; then
-    echo "Egg CS2 не импортирован"
+  echo "NEST_ID=${NEST_ID}"
+  EGG_ID="$(
+    cd "$PANEL_DIR" && \
+    env -u DATABASE_URL \
+      PANEL_DIR="$PANEL_DIR" \
+      NEST_ID="$NEST_ID" \
+      EGG_PATH="$EGG_JSON" \
+      php /opt/cybergau/deploy/import-egg.php
+  )"
+  EGG_ID="$(echo "$EGG_ID" | tr -d '[:space:]')"
+  if [[ -z "$EGG_ID" || ! "$EGG_ID" =~ ^[0-9]+$ ]]; then
+    echo "Egg CS2 не импортирован (EGG_ID='${EGG_ID}')"
     exit 1
   fi
+  echo "EGG_ID=${EGG_ID}"
 
   NODE_DISK_MB="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nodes/${NODE_ID}" | jq -r '.attributes.disk // 0')"
   WANT_DISK="${CS2_DISK_MB:-90000}"
