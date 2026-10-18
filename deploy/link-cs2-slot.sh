@@ -73,6 +73,38 @@ if [[ ! -x "$CS2_BIN" ]]; then
   exit 1
 fi
 
+# Disable Valve default bots — they fill 1v1/2v2 slots and cause SERVERFULL.
+CFG_SRC="${CS2_CFG_DIR:-/opt/cybergau/deploy/cs2-cfg}"
+CFG_DEST="${DEST}/game/csgo/cfg"
+mkdir -p "$CFG_DEST"
+if [[ -d "$CFG_SRC" ]]; then
+  cp -a "$CFG_SRC"/. "$CFG_DEST"/
+fi
+# Stock gamemode_*.cfg (copied as real files) re-enable bots; force them off.
+for mode_cfg in "${CFG_DEST}"/gamemode_*.cfg; do
+  [[ -f "$mode_cfg" ]] || continue
+  [[ "$mode_cfg" == *_server.cfg ]] && continue
+  sed -i -E \
+    -e 's/^bot_quota[[:space:]].*/bot_quota\t\t\t\t\t\t\t0/' \
+    -e 's/^bot_quota_mode[[:space:]].*/bot_quota_mode\t\t\t\t\t\t\tnormal/' \
+    "$mode_cfg" || true
+done
+for mode in competitive competitive2v2 casual; do
+  cat > "${CFG_DEST}/gamemode_${mode}_server.cfg" <<'EOF'
+bot_quota 0
+bot_quota_mode normal
+bot_join_after_player 0
+bot_kick
+EOF
+done
+cat > "${CFG_DEST}/server.cfg" <<'EOF'
+bot_quota 0
+bot_quota_mode normal
+bot_join_after_player 0
+bot_auto_vacate 1
+bot_kick
+EOF
+
 # Wings/Docker run as pterodactyl uid typically 999 or from config.
 OWNER="${PTERODACTYL_USERNAME:-pterodactyl}"
 if id "$OWNER" >/dev/null 2>&1; then
