@@ -10,6 +10,9 @@ ENV_FILE=/etc/cybergau/env
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/install-log.sh"
+# shellcheck disable=SC1091
+source "$HERE/install-progress.sh"
+cybergau_progress_init
 cybergau_step "install.sh start"
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -41,196 +44,203 @@ export DEBIAN_FRONTEND=noninteractive
 export HOME="${HOME:-/root}"
 export COMPOSER_HOME="${COMPOSER_HOME:-/root/.composer}"
 
-apt-get update
-apt-get install -y ca-certificates curl git rsync docker.io qemu-guest-agent
-if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
-  apt-get install -y docker-compose-v2
-else
-  apt-get install -y docker-compose-plugin || true
-fi
-# Compose 2.40+ по умолчанию собирает через Bake; без buildx сборка зависает
-# на «load metadata» (Docker Hub / node base image).
-if apt-cache show docker-buildx >/dev/null 2>&1; then
-  apt-get install -y docker-buildx
-elif apt-cache show docker-buildx-plugin >/dev/null 2>&1; then
-  apt-get install -y docker-buildx-plugin
-fi
-export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
-cybergau_step "docker + qemu-guest-agent"
-systemctl enable --now docker
-systemctl enable --now qemu-guest-agent || true
-
-# Путь до интернета на этой сети не пропускает кадры 1500 байт.
-# Контейнеры тогда зависают на больших загрузках (npm, Steam).
-if ! ping -M do -s 1472 -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
-  mkdir -p /etc/docker
-  if [[ ! -f /etc/docker/daemon.json ]]; then
-    printf '%s\n' '{ "mtu": 1450 }' >/etc/docker/daemon.json
-    systemctl restart docker
-  fi
-  iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null \
-    || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-fi
-
-# Некоторые роутеры анонсируют IPv6, но не выпускают его в интернет.
-# Docker Hub тогда зависает на AAAA-записях. Если реестр по IPv6 недоступен, выключаем IPv6.
-# stderr в /dev/null: ожидаемый fail иначе шумит в лог как curl: (7).
-hub_v6="$(timeout 8 curl -6 -sS -o /dev/null --max-time 5 -w '%{http_code}' https://registry-1.docker.io/v2/ 2>/dev/null || true)"
-if [[ "$hub_v6" != "200" && "$hub_v6" != "401" ]]; then
-  echo "IPv6 Docker Hub probe failed (code=${hub_v6:-none}) — disabling IPv6"
-  sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
-  sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null
-  printf '%s\n' 'net.ipv6.conf.all.disable_ipv6=1' 'net.ipv6.conf.default.disable_ipv6=1' >/etc/sysctl.d/99-cybergau-ipv6.conf
-fi
-
+# Always refresh /opt/cybergau from this tree so resume picks up installer fixes.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p /opt/cybergau
 if [[ "$ROOT" != "/opt/cybergau" ]]; then
   rsync -a --delete --exclude .git --exclude node_modules --exclude .next --exclude dist "$ROOT"/ /opt/cybergau/
 fi
-
 if [[ ! -d /opt/cybergau/.git && -n "${CYBERGAU_REPO:-}" ]]; then
   rm -rf /opt/cybergau
   git clone "$CYBERGAU_REPO" /opt/cybergau
 fi
-
 install -m 600 "$ENV_FILE" /opt/cybergau/.env
 
-if [[ "$CYBERGAU_ACCESS" == "wireguard" ]]; then
-  apt-get install -y wireguard
-  bash /opt/cybergau/deploy/setup-wireguard.sh
-else
-  systemctl disable --now wg-quick@wg0 >/dev/null 2>&1 || true
-fi
-
-install -m 644 /opt/cybergau/deploy/cybergau.service /etc/systemd/system/cybergau.service
-systemctl daemon-reload
-systemctl enable cybergau.service
-
-# Прогрев базовых образов: иначе «docker compose up --build» может надолго
-# зависнуть на load metadata. Docker Hub иногда залипает — пробуем mirror.gcr.io.
-pull_image() {
-  local img="$1"
-  local mirror="mirror.gcr.io/library/${img}"
-  echo "docker pull ${img}"
-  local attempt
-  for attempt in 1 2 3 4 5; do
-    if timeout 240 docker pull "$mirror" && docker tag "$mirror" "$img"; then
-      return 0
-    fi
-    if timeout 240 docker pull "$img"; then
-      return 0
-    fi
-    echo "pull ${img} retry ${attempt}"
-    sleep 5
-  done
-  return 1
-}
-for img in postgres:16-alpine node:22-alpine; do
-  if ! pull_image "$img"; then
-    echo "Не удалось скачать ${img} (Docker Hub / mirror.gcr.io)"
-    exit 1
+if cybergau_should_run docker_stack; then
+  apt-get update
+  apt-get install -y ca-certificates curl git rsync docker.io qemu-guest-agent
+  if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
+    apt-get install -y docker-compose-v2
+  else
+    apt-get install -y docker-compose-plugin || true
   fi
-done
+  # Compose 2.40+ по умолчанию собирает через Bake; без buildx сборка зависает
+  # на «load metadata» (Docker Hub / node base image).
+  if apt-cache show docker-buildx >/dev/null 2>&1; then
+    apt-get install -y docker-buildx
+  elif apt-cache show docker-buildx-plugin >/dev/null 2>&1; then
+    apt-get install -y docker-buildx-plugin
+  fi
+  export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
+  cybergau_step "docker + qemu-guest-agent"
+  systemctl enable --now docker
+  systemctl enable --now qemu-guest-agent || true
 
-# Собираем образы здесь (один раз), а не в systemd-сервисе на каждом старте.
-cybergau_step "docker compose build"
-(
-  cd /opt/cybergau
-  docker compose --env-file /opt/cybergau/.env build
-)
+  # Путь до интернета на этой сети не пропускает кадры 1500 байт.
+  if ! ping -M do -s 1472 -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
+    mkdir -p /etc/docker
+    if [[ ! -f /etc/docker/daemon.json ]]; then
+      printf '%s\n' '{ "mtu": 1450 }' >/etc/docker/daemon.json
+      systemctl restart docker
+    fi
+    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null \
+      || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+  fi
 
-cybergau_step "systemctl restart cybergau.service"
-systemctl restart cybergau.service
+  # stderr в /dev/null: ожидаемый fail иначе шумит в лог как curl: (7).
+  hub_v6="$(timeout 8 curl -6 -sS -o /dev/null --max-time 5 -w '%{http_code}' https://registry-1.docker.io/v2/ 2>/dev/null || true)"
+  if [[ "$hub_v6" != "200" && "$hub_v6" != "401" ]]; then
+    echo "IPv6 Docker Hub probe failed (code=${hub_v6:-none}) — disabling IPv6"
+    sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
+    sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null
+    printf '%s\n' 'net.ipv6.conf.all.disable_ipv6=1' 'net.ipv6.conf.default.disable_ipv6=1' >/etc/sysctl.d/99-cybergau-ipv6.conf
+  fi
 
-# Порты для сайта, панели, Wings и CS2 (если ufw уже включён).
-cybergau_step "ufw ports (если active)"
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
-  ufw allow 3000/tcp comment 'cyberGAU web' || true
-  ufw allow "${PANEL_PORT:-8088}/tcp" comment 'cyberGAU panel' || true
-  ufw allow 8080/tcp comment 'cyberGAU wings' || true
-  ufw allow 27015:27030/tcp comment 'cyberGAU CS2' || true
-  ufw allow 27015:27030/udp comment 'cyberGAU CS2' || true
   if [[ "$CYBERGAU_ACCESS" == "wireguard" ]]; then
-    ufw allow 51820/udp comment 'cyberGAU wireguard' || true
+    apt-get install -y wireguard
+    bash /opt/cybergau/deploy/setup-wireguard.sh
+  else
+    systemctl disable --now wg-quick@wg0 >/dev/null 2>&1 || true
   fi
+
+  install -m 644 /opt/cybergau/deploy/cybergau.service /etc/systemd/system/cybergau.service
+  systemctl daemon-reload
+  systemctl enable cybergau.service
+
+  pull_image() {
+    local img="$1"
+    local mirror="mirror.gcr.io/library/${img}"
+    echo "docker pull ${img}"
+    local attempt
+    for attempt in 1 2 3 4 5; do
+      if timeout 240 docker pull "$mirror" && docker tag "$mirror" "$img"; then
+        return 0
+      fi
+      if timeout 240 docker pull "$img"; then
+        return 0
+      fi
+      echo "pull ${img} retry ${attempt}"
+      sleep 5
+    done
+    return 1
+  }
+  for img in postgres:16-alpine node:22-alpine; do
+    if ! pull_image "$img"; then
+      echo "Не удалось скачать ${img} (Docker Hub / mirror.gcr.io)"
+      exit 1
+    fi
+  done
+
+  cybergau_step "docker compose build"
+  (
+    cd /opt/cybergau
+    export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
+    docker compose --env-file /opt/cybergau/.env build
+  )
+
+  cybergau_step "systemctl restart cybergau.service"
+  systemctl restart cybergau.service
+
+  cybergau_step "ufw ports (если active)"
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
+    ufw allow 3000/tcp comment 'cyberGAU web' || true
+    ufw allow "${PANEL_PORT:-8088}/tcp" comment 'cyberGAU panel' || true
+    ufw allow 8080/tcp comment 'cyberGAU wings' || true
+    ufw allow 27015:27030/tcp comment 'cyberGAU CS2' || true
+    ufw allow 27015:27030/udp comment 'cyberGAU CS2' || true
+    if [[ "$CYBERGAU_ACCESS" == "wireguard" ]]; then
+      ufw allow 51820/udp comment 'cyberGAU wireguard' || true
+    fi
+  fi
+  cybergau_done docker_stack
+else
+  systemctl enable --now docker >/dev/null 2>&1 || true
+  systemctl start cybergau.service >/dev/null 2>&1 || true
 fi
 
 WEB="${PUBLIC_WEB_URL:-http://127.0.0.1:3000}"
 WEB="${WEB%/}"
 
-# Плагин скинов нужен и сайту (/backend/skins/plugin.zip), и CS2 egg при установке слота.
-cybergau_step "build-skinchanger.sh"
-bash /opt/cybergau/deploy/build-skinchanger.sh
-
-# Одна общая установка CS2 для всех слотов (hardlink из /var/lib/cybergau/cs2-base).
-if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
-  cybergau_step "build-cs2-base.sh (shared Steam install)"
-  bash /opt/cybergau/deploy/build-cs2-base.sh
+if cybergau_should_run skinchanger; then
+  cybergau_step "build-skinchanger.sh"
+  bash /opt/cybergau/deploy/build-skinchanger.sh
+  cybergau_done skinchanger
 fi
 
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
-  cybergau_step "pterodactyl.sh (panel + wings + CS2 pool)"
-  bash /opt/cybergau/deploy/pterodactyl.sh
+  if cybergau_should_run cs2_base; then
+    cybergau_step "build-cs2-base.sh (shared Steam install)"
+    bash /opt/cybergau/deploy/build-cs2-base.sh
+    cybergau_done cs2_base
+  fi
+
+  if cybergau_should_run pterodactyl; then
+    cybergau_step "pterodactyl.sh (panel + wings + CS2 pool)"
+    bash /opt/cybergau/deploy/pterodactyl.sh
+    cybergau_done pterodactyl
+  fi
+
   # shellcheck disable=SC1090
   set -a; source /etc/cybergau/env; set +a
   cybergau_step "apply-env (force-recreate API with panel keys)"
   bash /opt/cybergau/deploy/apply-env.sh
 
-  cybergau_step "acceptance: keys in container, nginx, wings, ServerSlot, plugin.zip"
-  if ! grep -q '^PTERODACTYL_APP_KEY=.\+' /etc/cybergau/env || ! grep -q '^PTERODACTYL_CLIENT_KEY=.\+' /etc/cybergau/env; then
-    echo "Ключи PTERODACTYL_APP_KEY / PTERODACTYL_CLIENT_KEY пусты в /etc/cybergau/env"
-    exit 1
-  fi
-  if [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_APP_KEY 2>/dev/null || true)" ]] \
-    || [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_CLIENT_KEY 2>/dev/null || true)" ]]; then
-    echo "Ключи панели есть в файле, но НЕ внутри контейнера api — пул не заработает."
-    echo "Запустите: sudo bash /opt/cybergau/deploy/apply-env.sh"
-    exit 1
-  fi
-  if ! systemctl is-active --quiet nginx; then
-    echo "nginx не активен после установки панели"
-    systemctl status nginx --no-pager -l || true
-    exit 1
-  fi
-  if ! systemctl is-active --quiet wings; then
-    echo "wings не активен после установки панели"
-    systemctl status wings --no-pager -l || true
-    journalctl -u wings -n 40 --no-pager || true
-    exit 1
-  fi
-
-  # Дождаться API, free ServerSlot и plugin.zip для скинченджера.
-  ok=0
-  slots=0
-  plugin_ok=0
-  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    echo "acceptance attempt ${attempt}/12 (slots=${slots:-0} plugin=${plugin_ok})"
-    if curl -sf --max-time 5 "${WEB}/backend/health" >/dev/null 2>&1 \
-      || docker exec cybergau-api-1 wget -q -O /dev/null http://127.0.0.1:4000/health 2>/dev/null; then
-      slots="$(docker exec cybergau-postgres-1 psql -U "${POSTGRES_USER:-cybergau}" -d "${POSTGRES_DB:-cybergau}" -Atc \
-        "SELECT count(*) FROM \"ServerSlot\" WHERE status='free' AND purpose='pool';" 2>/dev/null || echo 0)"
-      if curl -sfI --max-time 5 "${WEB}/backend/skins/plugin.zip" 2>/dev/null | head -n1 | grep -qE 'HTTP/[0-9.]+ 200'; then
-        plugin_ok=1
-      elif docker exec cybergau-api-1 wget -q -S -O /dev/null http://127.0.0.1:4000/skins/plugin.zip 2>&1 | grep -q '200 OK'; then
-        plugin_ok=1
-      fi
-      if [[ "${slots:-0}" -ge 1 && "$plugin_ok" == "1" ]]; then
-        ok=1
-        break
-      fi
+  if cybergau_should_run acceptance; then
+    cybergau_step "acceptance: keys in container, nginx, wings, ServerSlot, plugin.zip"
+    if ! grep -q '^PTERODACTYL_APP_KEY=.\+' /etc/cybergau/env || ! grep -q '^PTERODACTYL_CLIENT_KEY=.\+' /etc/cybergau/env; then
+      echo "Ключи PTERODACTYL_APP_KEY / PTERODACTYL_CLIENT_KEY пусты в /etc/cybergau/env"
+      exit 1
     fi
-    sleep 5
-  done
-  if [[ "$ok" != "1" ]]; then
-    echo "Панель/пул/скины не готовы после install (free ServerSlot=${slots:-0}, plugin.zip ok=${plugin_ok})."
-    echo "Проверьте: systemctl status nginx wings; ключи PTERODACTYL_* в /etc/cybergau/env; ${WEB}/backend/skins/plugin.zip"
-    echo "Ключи в контейнере: APP=$(docker exec cybergau-api-1 printenv PTERODACTYL_APP_KEY 2>/dev/null | wc -c) CLIENT=$(docker exec cybergau-api-1 printenv PTERODACTYL_CLIENT_KEY 2>/dev/null | wc -c)"
-    docker ps -a --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || true
-    docker logs cybergau-api-1 --tail 40 2>&1 || true
-    exit 1
+    if [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_APP_KEY 2>/dev/null || true)" ]] \
+      || [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_CLIENT_KEY 2>/dev/null || true)" ]]; then
+      echo "Ключи панели есть в файле, но НЕ внутри контейнера api — пул не заработает."
+      echo "Запустите: sudo bash /opt/cybergau/deploy/apply-env.sh"
+      exit 1
+    fi
+    if ! systemctl is-active --quiet nginx; then
+      echo "nginx не активен после установки панели"
+      systemctl status nginx --no-pager -l || true
+      exit 1
+    fi
+    if ! systemctl is-active --quiet wings; then
+      echo "wings не активен после установки панели"
+      systemctl status wings --no-pager -l || true
+      journalctl -u wings -n 40 --no-pager || true
+      exit 1
+    fi
+
+    ok=0
+    slots=0
+    plugin_ok=0
+    for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      echo "acceptance attempt ${attempt}/12 (slots=${slots:-0} plugin=${plugin_ok})"
+      if curl -sf --max-time 5 "${WEB}/backend/health" >/dev/null 2>&1 \
+        || docker exec cybergau-api-1 wget -q -O /dev/null http://127.0.0.1:4000/health 2>/dev/null; then
+        slots="$(docker exec cybergau-postgres-1 psql -U "${POSTGRES_USER:-cybergau}" -d "${POSTGRES_DB:-cybergau}" -Atc \
+          "SELECT count(*) FROM \"ServerSlot\" WHERE status='free' AND purpose='pool';" 2>/dev/null || echo 0)"
+        if curl -sfI --max-time 5 "${WEB}/backend/skins/plugin.zip" 2>/dev/null | head -n1 | grep -qE 'HTTP/[0-9.]+ 200'; then
+          plugin_ok=1
+        elif docker exec cybergau-api-1 wget -q -S -O /dev/null http://127.0.0.1:4000/skins/plugin.zip 2>&1 | grep -q '200 OK'; then
+          plugin_ok=1
+        fi
+        if [[ "${slots:-0}" -ge 1 && "$plugin_ok" == "1" ]]; then
+          ok=1
+          break
+        fi
+      fi
+      sleep 5
+    done
+    if [[ "$ok" != "1" ]]; then
+      echo "Панель/пул/скины не готовы после install (free ServerSlot=${slots:-0}, plugin.zip ok=${plugin_ok})."
+      echo "Проверьте: systemctl status nginx wings; ключи PTERODACTYL_* в /etc/cybergau/env; ${WEB}/backend/skins/plugin.zip"
+      echo "Ключи в контейнере: APP=$(docker exec cybergau-api-1 printenv PTERODACTYL_APP_KEY 2>/dev/null | wc -c) CLIENT=$(docker exec cybergau-api-1 printenv PTERODACTYL_CLIENT_KEY 2>/dev/null | wc -c)"
+      docker ps -a --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || true
+      docker logs cybergau-api-1 --tail 40 2>&1 || true
+      exit 1
+    fi
+    echo "Игровой пул готов: ${slots} свободный слот(ов); скинченджер: ${WEB}/backend/skins/plugin.zip"
+    cybergau_done acceptance
   fi
-  echo "Игровой пул готов: ${slots} свободный слот(ов); скинченджер: ${WEB}/backend/skins/plugin.zip"
 fi
 
 if [[ -z "${STEAM_GSLT:-}" ]]; then

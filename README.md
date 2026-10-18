@@ -24,7 +24,9 @@
 curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh | sudo bash
 ```
 
-`get.sh` кладёт код в `/opt/cybergau`, пишет `/etc/cybergau/env` (пароли и IP с основного интерфейса: 192.168.x / 10.x / …), ставит Docker, сайт, API, PostgreSQL, `cybergau.service`, панель Pterodactyl и пул CS2. По умолчанию `CYBERGAU_ACCESS=lan`. Переопределения: `CYBERGAU_ACCESS=wireguard`, `STEAM_WEB_API_KEY=...`, `WG_ENDPOINT=ip:51820`, `POOL_SIZE=1`, `FORCE_ENV=1`.
+`get.sh` кладёт код в `/opt/cybergau`, пишет `/etc/cybergau/env` (пароли и IP с основного интерфейса: 192.168.x / 10.x / …), ставит Docker, сайт, API, PostgreSQL, `cybergau.service`, панель Pterodactyl и пул CS2. По умолчанию `CYBERGAU_ACCESS=lan`. Переопределения: `CYBERGAU_ACCESS=wireguard`, `STEAM_WEB_API_KEY=...`, `WG_ENDPOINT=ip:51820`, `POOL_SIZE=1`, `FORCE_ENV=1`, `FORCE_INSTALL=1` (полный перезапуск без skip).
+
+Повторный запуск установщика продолжает с прерванного шага: уже готовые docker/skinchanger/cs2-base/panel пропускаются (состояние в `/var/lib/cybergau/install-state`).
 
 Игра CS2 качается один раз в `/var/lib/cybergau/cs2-base` (~50–60 GB); слоты пула делают hardlink-копию и не гоняют SteamCMD заново. На диске для базы нужно ≥70 GB свободно; при готовой базе 4 слота укладываются примерно в ~100 GB суммарно (база + мелкие cfg/logs на слот). Обновить игру: `sudo FORCE_CS2_BASE=1 bash /opt/cybergau/deploy/build-cs2-base.sh`.
 

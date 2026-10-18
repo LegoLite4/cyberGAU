@@ -10,6 +10,9 @@ fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/install-log.sh"
+# shellcheck disable=SC1091
+source "$HERE/install-progress.sh"
+cybergau_progress_init
 cybergau_step "pterodactyl.sh start"
 
 ENV_FILE=/etc/cybergau/env
@@ -231,10 +234,14 @@ if [[ -z "$NODE_ID" ]]; then
   NODE_ID="$(curl -sf "${AUTH[@]}" -d "{\"name\":\"cybergau\",\"location_id\":${LOC_ID},\"fqdn\":\"${PANEL_FQDN}\",\"scheme\":\"http\",\"behind_proxy\":false,\"maintenance_mode\":false,\"memory\":${MEM},\"memory_overallocate\":0,\"disk\":${DISK},\"disk_overallocate\":0,\"upload_size\":100,\"daemon_sftp\":2022,\"daemon_listen\":8080}" "$BASE/api/application/nodes" | jq -r '.attributes.id')"
 fi
 
+CS2_BASE_DIR="${CS2_BASE_DIR:-/var/lib/cybergau/cs2-base}"
+mkdir -p "$CS2_BASE_DIR"
+
 if [[ ! -f /etc/pterodactyl/config.yml ]] || grep -q '^{' /etc/pterodactyl/config.yml; then
   curl -sf -H "Authorization: Bearer ${APP_KEY}" -H "Accept: Application/vnd.pterodactyl.v1+json" \
     "$BASE/api/application/nodes/${NODE_ID}/configuration" -o /etc/pterodactyl/config.yml
-  python3 /opt/cybergau/deploy/wings-config.py /etc/pterodactyl/config.yml /etc/pterodactyl/config.yml
+  CS2_BASE_DIR="$CS2_BASE_DIR" python3 /opt/cybergau/deploy/wings-config.py \
+    /etc/pterodactyl/config.yml /etc/pterodactyl/config.yml
   chmod 600 /etc/pterodactyl/config.yml
 fi
 
@@ -255,21 +262,9 @@ docker:
 EOF
 fi
 
-# Shared CS2 base for all pool slots (hardlinked from egg install script).
-CS2_BASE_DIR="${CS2_BASE_DIR:-/var/lib/cybergau/cs2-base}"
-mkdir -p "$CS2_BASE_DIR"
-if ! grep -q '^allowed_mounts:' /etc/pterodactyl/config.yml; then
-  printf '\n%s\n%s\n' 'allowed_mounts:' "  - ${CS2_BASE_DIR}" >>/etc/pterodactyl/config.yml
-elif ! grep -qF "$CS2_BASE_DIR" /etc/pterodactyl/config.yml; then
-  # Insert path under existing allowed_mounts list.
-  awk -v path="$CS2_BASE_DIR" '
-    BEGIN { done=0 }
-    /^allowed_mounts:/ { print; print "  - " path; done=1; next }
-    { print }
-    END { if (!done) { print "allowed_mounts:"; print "  - " path } }
-  ' /etc/pterodactyl/config.yml > /etc/pterodactyl/config.yml.tmp
-  mv /etc/pterodactyl/config.yml.tmp /etc/pterodactyl/config.yml
-fi
+# Shared CS2 base: valid YAML list (never leave `allowed_mounts: []` + dangling `- path`).
+CS2_BASE_DIR="$CS2_BASE_DIR" python3 /opt/cybergau/deploy/ensure-wings-mounts.py \
+  /etc/pterodactyl/config.yml "$CS2_BASE_DIR"
 chmod 600 /etc/pterodactyl/config.yml
 
 cat > /etc/systemd/system/wings.service <<'EOF'
@@ -294,7 +289,6 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl reset-failed wings || true
-systemctl enable --now wings
 
 if [[ -z "${LOC_ID:-}" || -z "${NODE_ID:-}" ]]; then
   echo "Панель не создала location/node (LOC_ID=${LOC_ID:-} NODE_ID=${NODE_ID:-})"
@@ -302,17 +296,26 @@ if [[ -z "${LOC_ID:-}" || -z "${NODE_ID:-}" ]]; then
 fi
 
 systemctl enable --now nginx
-systemctl enable --now wings
 # Reload Wings so allowed_mounts for shared CS2 base is applied.
-systemctl restart wings
-sleep 2
+systemctl enable wings
+systemctl restart wings || true
+wings_ok=0
+for _w in $(seq 1 20); do
+  if systemctl is-active --quiet wings; then
+    wings_ok=1
+    break
+  fi
+  sleep 1
+done
 if ! systemctl is-active --quiet nginx; then
   echo "nginx не активен после установки панели"
   exit 1
 fi
-if ! systemctl is-active --quiet wings; then
+if [[ "$wings_ok" != "1" ]]; then
   echo "wings не активен после установки панели"
+  echo "config: /etc/pterodactyl/config.yml"
   systemctl status wings --no-pager -l || true
+  journalctl -u wings -n 40 --no-pager || true
   exit 1
 fi
 

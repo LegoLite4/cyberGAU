@@ -41,6 +41,19 @@ def emit(obj, indent=0):
 src, dst = sys.argv[1], sys.argv[2]
 with open(src, encoding="utf-8") as handle:
     data = json.load(handle)
+
+# Inject shared CS2 base into allowed_mounts at convert time (avoid empty `[]`
+# followed by a post-edit list item, which breaks Wings YAML parsing).
+import os
+
+cs2_base = os.environ.get("CS2_BASE_DIR") or "/var/lib/cybergau/cs2-base"
+mounts = data.get("allowed_mounts")
+if not isinstance(mounts, list):
+    mounts = []
+if cs2_base not in mounts:
+    mounts = list(mounts) + [cs2_base]
+data["allowed_mounts"] = mounts
+
 text = "\n".join(emit(data)) + "\n"
 with open(dst, "w", encoding="utf-8") as handle:
     handle.write(text)
