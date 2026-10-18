@@ -56,6 +56,16 @@ if ($mountId > 0) {
 /** @var \Pterodactyl\Services\Servers\ReinstallServerService $reinstall */
 $reinstall = $app->make(Pterodactyl\Services\Servers\ReinstallServerService::class);
 
+// Wings du() counts hardlinks at full size — keep disk limit above apparent base size.
+$baseBytes = 0;
+$duOut = [];
+$duCode = 0;
+exec('du -sb ' . escapeshellarg($baseDir) . ' 2>/dev/null', $duOut, $duCode);
+if ($duCode === 0 && !empty($duOut[0]) && preg_match('/^(\d+)/', $duOut[0], $m)) {
+    $baseBytes = (int) $m[1];
+}
+$minDiskMb = $baseBytes > 0 ? (int) ($baseBytes / 1024 / 1024) + 4096 : 73728;
+
 $servers = Pterodactyl\Models\Server::query()
     ->where('name', 'like', $prefix . '%')
     ->orderBy('id')
@@ -63,9 +73,18 @@ $servers = Pterodactyl\Models\Server::query()
 
 $linked = 0;
 foreach ($servers as $server) {
+    $dirty = false;
     if ((int) $server->egg_id !== $eggId) {
         $server->egg_id = $eggId;
         $server->nest_id = $egg->nest_id;
+        $dirty = true;
+    }
+    if ((int) $server->disk < $minDiskMb) {
+        $server->disk = $minDiskMb;
+        $dirty = true;
+        echo "disk_limit server_id={$server->id} disk={$minDiskMb}\n";
+    }
+    if ($dirty) {
         $server->save();
     }
     if ($mount) {

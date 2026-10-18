@@ -384,8 +384,17 @@ EXISTING="$(curl -sf "${AUTH[@]}" "$BASE/api/application/servers?per_page=100" |
 NEED=$((POOL - EXISTING))
 cybergau_step "CS2 pool: existing=${EXISTING} need=${NEED} (POOL_SIZE=${POOL})"
 
-# Slot volume holds cfg/logs/demos only; the game lives in /var/lib/cybergau/cs2-base.
-WANT_DISK="${CS2_DISK_MB:-8192}"
+# Wings measures hardlinked trees with du() as full size — disk limit must cover the base.
+if [[ -z "${CS2_DISK_MB:-}" ]]; then
+  BASE_BYTES="$(du -sb "$CS2_BASE_DIR" 2>/dev/null | awk '{print $1}')"
+  if [[ -n "${BASE_BYTES:-}" && "$BASE_BYTES" -gt 0 ]]; then
+    WANT_DISK=$((BASE_BYTES / 1024 / 1024 + 4096))
+  else
+    WANT_DISK=73728
+  fi
+else
+  WANT_DISK="$CS2_DISK_MB"
+fi
 NODE_DISK_MB="$(curl -sf "${AUTH[@]}" "$BASE/api/application/nodes/${NODE_ID}" | jq -r '.attributes.disk // 0')"
 if [[ "${NODE_DISK_MB:-0}" -gt 0 ]]; then
   MAX_DISK=$((NODE_DISK_MB * 90 / 100))
@@ -394,6 +403,7 @@ if [[ "${NODE_DISK_MB:-0}" -gt 0 ]]; then
     WANT_DISK="$MAX_DISK"
   fi
 fi
+echo "CS2 slot disk limit=${WANT_DISK}MB (hardlink apparent size)"
 
 if [[ "$NEED" -gt 0 ]]; then
   RCON_PASSWORD="$(openssl rand -hex 8)"
