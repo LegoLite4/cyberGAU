@@ -141,33 +141,3 @@ after="$(df -h / | awk 'NR==2 {print $2, $4}')"
 echo "Корень после: size=${after%% *} avail=${after##* }"
 df -h /
 lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS "$DISK" 2>/dev/null || lsblk
-
-# Persist: after the next Proxmox clone/resize, grow again on boot without re-running install.
-install_boot_unit() {
-  local script="/opt/cybergau/deploy/grow-root-disk.sh"
-  if [[ ! -f "$script" && -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/grow-root-disk.sh" ]]; then
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/grow-root-disk.sh"
-  fi
-  if [[ ! -f "$script" ]]; then
-    return 0
-  fi
-  mkdir -p /etc/systemd/system
-  cat >/etc/systemd/system/cybergau-grow-root.service <<EOF
-[Unit]
-Description=cyberGAU: grow root filesystem to fill virtual disk
-After=local-fs.target
-Before=docker.service cybergau.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash ${script}
-RemainAfterExit=yes
-TimeoutStartSec=120
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  systemctl daemon-reload
-  systemctl enable cybergau-grow-root.service >/dev/null 2>&1 || true
-}
-install_boot_unit

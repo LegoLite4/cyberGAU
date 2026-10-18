@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.
 
 Игра CS2 качается один раз в `/var/lib/cybergau/cs2-base` (~50–60 GB); слоты пула делают hardlink-копию и не гоняют SteamCMD заново. На диске для базы нужно ≥70 GB свободно; при готовой базе 4 слота укладываются примерно в ~100 GB суммарно (база + мелкие cfg/logs на слот). Обновить игру: `sudo FORCE_CS2_BASE=1 bash /opt/cybergau/deploy/build-cs2-base.sh`.
 
-После увеличения диска в Proxmox или клона VM раздел Ubuntu часто остаётся старого размера. Установщик сам расширяет корень (`deploy/grow-root-disk.sh`); вручную: `sudo bash /opt/cybergau/deploy/grow-root-disk.sh`.
+После увеличения диска в Proxmox или клона VM раздел Ubuntu часто остаётся старого размера — расширьте вручную: `sudo bash /opt/cybergau/deploy/grow-root-disk.sh`.
 
 После перезагрузки сами стартуют Docker, `cybergau.service`, `pteroq`, `wings`; при wireguard ещё `wg-quick@wg0`.
 

@@ -58,35 +58,7 @@ for _lock_wait in $(seq 1 60); do
 done
 
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl git openssl cloud-guest-utils parted e2fsprogs >/dev/null
-
-# After Proxmox resize/clone the virtual disk is bigger, but the root partition
-# often stays at the old size — grow it before we download CS2 / Docker images.
-if [[ -x "$TARGET/deploy/grow-root-disk.sh" ]]; then
-  log "Расширяю корневой раздел под размер диска (grow-root-disk.sh)"
-  bash "$TARGET/deploy/grow-root-disk.sh" || log "grow-root-disk: пропускаю (см. вывод выше)"
-elif command -v growpart >/dev/null 2>&1; then
-  log "Расширяю корневой раздел (inline growpart)"
-  ROOT_SRC="$(findmnt -n -o SOURCE / || true)"
-  PART="$ROOT_SRC"
-  if [[ "$PART" == /dev/mapper/* ]] || [[ "$PART" == /dev/dm-* ]]; then
-    PART="$(pvs --noheadings -o pv_name 2>/dev/null | awk 'NF{print $1; exit}' || true)"
-  fi
-  if [[ "$PART" =~ ^(/dev/nvme[0-9]+n[0-9]+)p([0-9]+)$ ]]; then
-    growpart "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" || true
-  elif [[ "$PART" =~ ^(/dev/[a-zA-Z]+[a-zA-Z0-9]*)([0-9]+)$ ]]; then
-    growpart "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" || true
-  fi
-  if command -v pvresize >/dev/null 2>&1; then
-    pvresize "$PART" 2>/dev/null || true
-    lvextend -l +100%FREE "$(findmnt -n -o SOURCE /)" 2>/dev/null || true
-  fi
-  case "$(findmnt -n -o FSTYPE /)" in
-    ext*) resize2fs "$(findmnt -n -o SOURCE /)" || true ;;
-    xfs) xfs_growfs / || true ;;
-  esac
-  df -h / | tee -a "$CYBERGAU_INSTALL_LOG" || true
-fi
+apt-get install -y -qq ca-certificates curl git openssl >/dev/null
 
 if [[ -d "$TARGET/.git" ]]; then
   log "Обновляю ${TARGET} → origin/${BRANCH}"
@@ -103,12 +75,6 @@ elif [[ ! -f "$TARGET/deploy/bootstrap.sh" ]]; then
   log "HEAD: $(git -C "$TARGET" rev-parse --short HEAD)"
 else
   log "Код уже в $TARGET (без .git — не обновляю)"
-fi
-
-# Repo is present now — run the full grow script (LVM/ext4/xfs) before install.
-if [[ -x "$TARGET/deploy/grow-root-disk.sh" ]]; then
-  log "grow-root-disk.sh (после клона репо)"
-  bash "$TARGET/deploy/grow-root-disk.sh" || log "grow-root-disk: не удалось расширить — проверьте df -h /"
 fi
 
 trap - EXIT

@@ -41,12 +41,6 @@ export DEBIAN_FRONTEND=noninteractive
 export HOME="${HOME:-/root}"
 export COMPOSER_HOME="${COMPOSER_HOME:-/root/.composer}"
 
-# After Proxmox disk enlarge/clone, use the full virtual disk before downloads.
-if [[ -f "$HERE/grow-root-disk.sh" ]]; then
-  cybergau_step "grow-root-disk.sh"
-  bash "$HERE/grow-root-disk.sh" || echo "grow-root-disk: продолжаю без расширения"
-fi
-
 apt-get update
 apt-get install -y ca-certificates curl git rsync docker.io qemu-guest-agent
 if apt-cache show docker-compose-v2 >/dev/null 2>&1; then

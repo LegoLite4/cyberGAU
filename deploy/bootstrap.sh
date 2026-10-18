@@ -89,12 +89,6 @@ ensure_repo() {
 
 ensure_repo
 
-# Proxmox clone/resize: make full disk visible before Steam/Docker need space.
-if [[ -f "$TARGET/deploy/grow-root-disk.sh" ]]; then
-  cybergau_step "grow-root-disk.sh"
-  bash "$TARGET/deploy/grow-root-disk.sh" || echo "grow-root-disk: продолжаю без расширения"
-fi
-
 cybergau_step "write-env"
 bash "$TARGET/deploy/write-env.sh"
 cybergau_step "install.sh"
