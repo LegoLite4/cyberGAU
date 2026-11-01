@@ -5,11 +5,12 @@ import { z } from "zod";
 import { createReadStream } from "fs";
 import { stat } from "fs/promises";
 import { authMode, clearSession, currentUser, hashPassword, linkSteam, loginOrRegisterSteam, openSession, requireUser, steamLoginUrl, toPublicUser, verifyPassword, verifySteam } from "./auth";
-import { FORMATS, MAPS, isFormat } from "./catalog";
+import { COMING_SOON_MODES, FORMATS, MAPS, isFormat } from "./catalog";
 import { prisma, publicWebUrl } from "./db";
 import { ensureMockSlot, listLobbies, listModes, newInviteCode, startLobby, startMode, stopLobby, stopMode, toLobbyDto } from "./lobbies";
 import { syncPanelServers } from "./pterodactyl";
 import { listCatalogWeapons, loadoutForSteam, loadoutForUser, pluginZipPath, saveLoadout, syncSteamInventory, type SkinItems } from "./skins";
+import { claimMission, getLeaderboard, listMissions, listPickem, votePickem } from "./social";
 
 const app = Fastify({ logger: true });
 
@@ -421,7 +422,18 @@ app.get("/skins/plugin.zip", async (_request, reply) => {
   return reply.send(createReadStream(path));
 });
 
-app.get("/modes", async () => ({ modes: await listModes() }));
+app.get("/modes", async () => ({
+  modes: await listModes(),
+  comingSoon: COMING_SOON_MODES.map((mode) => ({
+    ...mode,
+    playable: false,
+    playersOnline: 0,
+    status: "soon",
+    connect: null,
+    map: "",
+    slots: 0,
+  })),
+}));
 
 app.post("/modes/:mode/start", async (request, reply) => {
   try {
@@ -442,6 +454,44 @@ app.post("/modes/:mode/stop", async (request, reply) => {
   } catch (error) {
     reply.code(statusOf(error));
     return { error: error instanceof Error ? error.message : "Режим не остановлен" };
+  }
+});
+
+app.get("/leaderboard", async (request) => {
+  const query = request.query as { period?: string; mode?: string };
+  return getLeaderboard(query.period || "month", query.mode || "all");
+});
+
+app.get("/missions", async (request) => {
+  const user = await currentUser(request);
+  return listMissions(user?.id ?? null);
+});
+
+app.post("/missions/:id/claim", async (request, reply) => {
+  try {
+    const user = await requireUser(request);
+    const { id } = request.params as { id: string };
+    return await claimMission(user.id, id);
+  } catch (error) {
+    reply.code(statusOf(error));
+    return { error: error instanceof Error ? error.message : "Миссия не отмечена" };
+  }
+});
+
+app.get("/pickem", async (request) => {
+  const user = await currentUser(request);
+  return listPickem(user?.id ?? null);
+});
+
+app.post("/pickem/:id/vote", async (request, reply) => {
+  try {
+    const user = await requireUser(request);
+    const { id } = request.params as { id: string };
+    const body = z.object({ side: z.enum(["a", "b"]) }).parse(request.body);
+    return await votePickem(user.id, id, body.side);
+  } catch (error) {
+    reply.code(statusOf(error));
+    return { error: error instanceof Error ? error.message : "Голос не принят" };
   }
 });
 

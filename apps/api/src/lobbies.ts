@@ -196,10 +196,13 @@ export async function listModes() {
   const slots = await prisma.serverSlot.findMany({ where: { purpose: "mode" } });
   return Object.entries(MODES).map(([id, mode]) => {
     const slot = slots.find((item) => item.mode === id);
+    const live = slot?.status === "busy";
     return {
       id,
       ...mode,
-      status: slot?.status === "busy" ? "live" : "offline",
+      playable: true as const,
+      playersOnline: live ? Math.max(1, Math.min(mode.slots, 2)) : 0,
+      status: live ? "live" : "offline",
       connect: slot ? connectString(slot.allocationHost, slot.allocationPort) : null,
     };
   });
@@ -213,6 +216,8 @@ export async function startMode(modeId: string) {
     return {
       id: modeId,
       ...mode,
+      playable: true as const,
+      playersOnline: Math.max(1, Math.min(mode.slots, 2)),
       status: "live",
       connect: connectString(existing.allocationHost, existing.allocationPort),
     };
@@ -240,7 +245,14 @@ export async function startMode(modeId: string) {
       where: { id: slot.id },
       data: { allocationHost: host, allocationPort: port, status: "busy", purpose: "mode", mode: modeId },
     });
-    return { id: modeId, ...mode, status: "live", connect: connectString(updated.allocationHost, updated.allocationPort) };
+    return {
+      id: modeId,
+      ...mode,
+      playable: true as const,
+      playersOnline: 1,
+      status: "live",
+      connect: connectString(updated.allocationHost, updated.allocationPort),
+    };
   } catch (error) {
     await prisma.serverSlot.update({
       where: { id: slot.id },
@@ -255,7 +267,7 @@ export async function stopMode(modeId: string) {
   const slot = await prisma.serverSlot.findFirst({ where: { purpose: "mode", mode: modeId } });
   if (slot) await releaseSlot(slot.id);
   const mode = MODES[modeId as ModeId];
-  return { id: modeId, ...mode, status: "offline", connect: null };
+  return { id: modeId, ...mode, playable: true as const, playersOnline: 0, status: "offline", connect: null };
 }
 
 export async function ensureMockSlot() {

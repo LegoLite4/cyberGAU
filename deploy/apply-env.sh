@@ -19,8 +19,11 @@ install -m 600 "$ENV_FILE" "$APP_DIR/.env"
 cd "$APP_DIR"
 export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
 
-# Только api: здесь читаются ключи панели. web не трогаем без нужды.
+# api: ключи панели. web: пересобрать при REBUILD_WEB=1 (update.sh ставит по умолчанию).
 docker compose --env-file "$APP_DIR/.env" up -d --force-recreate --no-deps api
+if [[ "${REBUILD_WEB:-0}" == "1" ]]; then
+  docker compose --env-file "$APP_DIR/.env" up -d --build --force-recreate --no-deps web
+fi
 
 # Дождаться здоровья API
 for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do

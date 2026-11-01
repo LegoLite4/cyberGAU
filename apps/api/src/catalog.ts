@@ -64,6 +64,32 @@ export const MODES = {
 
 export type ModeId = keyof typeof MODES;
 
+/** UI-only modes (Cybershoke-like chips/cards). Not startable on this node yet. */
+export const COMING_SOON_MODES = [
+  { id: "arena", title: "Arena", summary: "Арена 1v1/2v2 — скоро на этой ноде.", chip: "Arena" },
+  { id: "knife", title: "Knife", summary: "Ножевые раунды — скоро.", chip: "Knife" },
+  { id: "awp", title: "AWP", summary: "Только AWP — скоро.", chip: "AWP" },
+  { id: "bhop", title: "Bhop", summary: "Банихоп — скоро.", chip: "Bhop" },
+  { id: "surf", title: "Surf", summary: "Сёрф — скоро.", chip: "Surf" },
+  { id: "kz", title: "KZ", summary: "Climb — скоро.", chip: "KZ" },
+  { id: "public", title: "Public", summary: "Паблик — скоро.", chip: "Public" },
+  { id: "hsdm", title: "HSDM", summary: "Headshot DM — скоро.", chip: "HSDM" },
+  { id: "aimdm", title: "AimDM", summary: "Aim arena — скоро.", chip: "AimDM" },
+  { id: "jail", title: "Jail", summary: "Jailbreak — скоро.", chip: "Jail" },
+  { id: "hns", title: "HNS", summary: "Hide and Seek — скоро.", chip: "HNS" },
+  { id: "execute", title: "Execute", summary: "Execute practice — скоро.", chip: "Execute" },
+  { id: "clutch", title: "Clutch", summary: "Clutch training — скоро.", chip: "Clutch" },
+  { id: "pistoldm", title: "PistolDM", summary: "Пистолетный DM — скоро.", chip: "PistolDM" },
+  { id: "awpdm", title: "AWPDM", summary: "AWP DM — скоро.", chip: "AWPDM" },
+  { id: "retake_cards", title: "Retake Cards", summary: "Ретейк с картами — скоро.", chip: "Retake Cards" },
+  { id: "multicfg", title: "MultiCFG", summary: "Несколько конфигов — скоро.", chip: "MultiCFG" },
+  { id: "maniac", title: "Maniac", summary: "Maniac — скоро.", chip: "Maniac" },
+  { id: "deathrun", title: "Deathrun", summary: "Deathrun — скоро.", chip: "Deathrun" },
+  { id: "minigames", title: "Minigames", summary: "Мини-игры — скоро.", chip: "Minigames" },
+  { id: "surf_combat", title: "Surf Combat", summary: "Surf combat — скоро.", chip: "Surf Combat" },
+  { id: "skin_inspect", title: "Skin Inspect", summary: "Осмотр скинов — скоро.", chip: "Skin Inspect" },
+] as const;
+
 export function isFormat(value: string): value is FormatId {
   return value in FORMATS;
 }

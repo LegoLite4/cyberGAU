@@ -37,12 +37,12 @@ elif [[ "${SKIP_CS2:-0}" != "1" && ! -x /var/lib/cybergau/cs2-base/game/bin/linu
   bash /opt/cybergau/deploy/build-cs2-base.sh
 fi
 
-echo ">>> docker compose up --build"
+echo ">>> docker compose up --build (api+web)"
 docker compose --env-file /opt/cybergau/.env up -d --build
 systemctl restart cybergau.service || true
 
-echo ">>> apply-env (keys into api)"
-bash /opt/cybergau/deploy/apply-env.sh || true
+echo ">>> apply-env (keys into api; rebuild web)"
+REBUILD_WEB=1 bash /opt/cybergau/deploy/apply-env.sh || true
 
 echo ">>> doctor"
 bash /opt/cybergau/deploy/cybergauctl.sh doctor || true

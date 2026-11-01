@@ -2,15 +2,24 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Press, Rise } from "../components/Motion";
 import { api, type CatalogWeapon, type SkinItem, type SkinItems, type User } from "../../lib/api";
 
 const WEARS = [
-  { value: 0.01, label: "Прямо с завода" },
-  { value: 0.1, label: "Немного поношенное" },
-  { value: 0.25, label: "После полевых" },
-  { value: 0.4, label: "Поношенное" },
-  { value: 0.6, label: "Закалённое в боях" },
+  { value: 0.01, label: "FN" },
+  { value: 0.1, label: "MW" },
+  { value: 0.25, label: "FT" },
+  { value: 0.4, label: "WW" },
+  { value: 0.6, label: "BS" },
+];
+
+const COLLECTIONS: Array<{ id: string; title: string; groups?: string[] }> = [
+  { id: "main", title: "Основная коллекция" },
+  { id: "rifles", title: "Винтовки", groups: ["Винтовки"] },
+  { id: "pistols", title: "Пистолеты", groups: ["Пистолеты"] },
+  { id: "smg", title: "Пистолеты-пулемёты", groups: ["Пистолеты-пулемёты"] },
+  { id: "heavy", title: "Тяжёлое", groups: ["Тяжёлое", "Дробовики", "Пулемёты"] },
+  { id: "knives", title: "Ножи", groups: ["Ножи"] },
+  { id: "gloves", title: "Перчатки", groups: ["Перчатки"] },
 ];
 
 function emptyItems(): SkinItems {
@@ -33,10 +42,12 @@ export default function SkinsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [weapons, setWeapons] = useState<CatalogWeapon[]>([]);
+  const [collectionId, setCollectionId] = useState("main");
   const [selectedId, setSelectedId] = useState("");
   const [items, setItems] = useState<SkinItems>(emptyItems);
   const [wear, setWear] = useState(0.01);
   const [query, setQuery] = useState("");
+  const [demo, setDemo] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
@@ -56,23 +67,40 @@ export default function SkinsPage() {
       .finally(() => setReady(true));
   }, []);
 
-  const selected = weapons.find((weapon) => weapon.classname === selectedId) ?? null;
+  const collection = COLLECTIONS.find((item) => item.id === collectionId) ?? COLLECTIONS[0];
+  const filteredWeapons = useMemo(() => {
+    if (!collection.groups?.length) return weapons;
+    const allowed = new Set(collection.groups.map((name) => name.toLowerCase()));
+    return weapons.filter((weapon) => allowed.has(weapon.group.toLowerCase()) || [...allowed].some((name) => weapon.group.toLowerCase().includes(name)));
+  }, [weapons, collection]);
+
   const groups = useMemo(() => {
     const rows: Array<{ name: string; weapons: CatalogWeapon[] }> = [];
-    for (const weapon of weapons) {
+    for (const weapon of filteredWeapons) {
       const last = rows[rows.length - 1];
       if (!last || last.name !== weapon.group) rows.push({ name: weapon.group, weapons: [weapon] });
       else last.weapons.push(weapon);
     }
     return rows;
-  }, [weapons]);
+  }, [filteredWeapons]);
 
+  useEffect(() => {
+    if (!filteredWeapons.some((weapon) => weapon.classname === selectedId)) {
+      setSelectedId(filteredWeapons[0]?.classname || "");
+    }
+  }, [filteredWeapons, selectedId]);
+
+  const selected = weapons.find((weapon) => weapon.classname === selectedId) ?? null;
   const visibleSkins = useMemo(() => {
     if (!selected) return [];
     const needle = query.trim().toLowerCase();
     if (!needle) return selected.skins;
     return selected.skins.filter((skin) => skin.name.toLowerCase().includes(needle));
   }, [selected, query]);
+
+  const selectedCount = useMemo(() => {
+    return Object.keys(items.weapons).length + (items.knife ? 1 : 0) + (items.gloves ? 1 : 0);
+  }, [items]);
 
   function writeSlot(weapon: CatalogWeapon, skin: SkinItem | null) {
     setItems((current) => {
@@ -112,7 +140,9 @@ export default function SkinsPage() {
     setNotice("");
     try {
       await api.saveSkins(items);
-      setNotice("Скины записаны на аккаунт. Они появятся при следующем появлении на сервере. Команда !skins обновляет их сразу.");
+      setNotice(demo
+        ? "Сохранено. Демо-режим включён: набор всё равно бесплатно записан на аккаунт."
+        : "Скины записаны. На сервере появятся при следующем заходе; !skins обновляет сразу.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Набор не сохранён");
     } finally {
@@ -120,12 +150,12 @@ export default function SkinsPage() {
     }
   }
 
-  if (!ready) return <p className="lead">Загрузка скинов...</p>;
+  if (!ready) return <p className="lead">Загрузка скинов…</p>;
   if (!user) {
     return (
       <section className="panel empty-board">
         <h1>Выбрать скины</h1>
-        <p className="lead">Сначала войдите в аккаунт cyberGAU.</p>
+        <p className="lead">Сначала войдите в аккаунт cyberGAU — выбор скинов полностью бесплатный.</p>
         <Link className="btn primary" href="/login">Войти</Link>
       </section>
     );
@@ -135,25 +165,48 @@ export default function SkinsPage() {
 
   return (
     <>
-      <section className="hero">
-        <div>
-          <p className="kicker">Скинченджер</p>
-          <h1>Выбрать скины</h1>
-          <p className="lead">Выберите любой скин из справочника и подтвердите набор. На сервере cyberGAU он надевается на ваш Steam.</p>
+      <div className="profile-banner">
+        <div className="row" style={{ gap: 14 }}>
+          {user.avatarUrl ? <img className="avatar lg" src={user.avatarUrl} alt="" /> : <span className="avatar lg" />}
+          <div>
+            <h1 style={{ fontSize: 28 }}>{user.personaName}</h1>
+            <p className="meta">{selectedCount} скинов в наборе · бесплатно</p>
+          </div>
         </div>
-        <Press>
-          <button className="btn primary" disabled={pending || !user.steamId} onClick={save}>
-            {pending ? "Сохраняем..." : "Сохранить"}
-          </button>
-        </Press>
-      </section>
+        <Link className="btn" href="/profile">Профиль</Link>
+      </div>
+
+      <div className="tabs">
+        <Link href="/profile">Профиль</Link>
+        <Link href="/profile?tab=friends">Друзья</Link>
+        <Link href="/skins" className="on">Выбор скинов</Link>
+        <Link href="/profile?tab=settings">Настройки</Link>
+      </div>
+
       {user.steamId ? null : (
-        <p className="error">Сначала привяжите Steam — это нужно для скинченджера. <a href="/backend/auth/steam">Привязать Steam — нужно для скинченджера</a></p>
+        <p className="error">Привяжите Steam для скинченджера на сервере. <a href="/backend/auth/steam">Привязать Steam</a></p>
       )}
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="ok">{notice}</p> : null}
+
       <div className="skin-layout">
-        <aside className="panel skin-weapons">
+        <aside className="skin-side">
+          <button type="button" className="collection-btn" onClick={() => setNotice("Слоты коллекций: используйте пресеты слева. Всё бесплатно, без Premium.")}>
+            <span>+ Создать коллекцию</span>
+            <span className="meta">14/20</span>
+          </button>
+          <div className="group-label">Коллекции</div>
+          {COLLECTIONS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={collectionId === item.id ? "collection-btn on" : "collection-btn"}
+              onClick={() => setCollectionId(item.id)}
+            >
+              <span>{item.title}</span>
+            </button>
+          ))}
+          <div className="group-label">Оружие</div>
           {groups.map((group) => (
             <div key={group.name}>
               <div className="group-label">{group.name}</div>
@@ -171,7 +224,18 @@ export default function SkinsPage() {
             </div>
           ))}
         </aside>
-        <section className="stack">
+
+        <section className="skin-main stack">
+          <div className="section-head">
+            <div>
+              <h2>{collection.title}</h2>
+              <p className="meta">{selected ? selected.name : "Скины не выбраны"}</p>
+            </div>
+            <label className="row" style={{ color: "var(--muted)", fontSize: 14 }}>
+              <input type="checkbox" checked={demo} onChange={(event) => setDemo(event.target.checked)} />
+              Бесплатный демо-режим
+            </label>
+          </div>
           <div className="toolbar">
             <input className="field" style={{ maxWidth: 280 }} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск скина" />
             <div className="segment" role="group" aria-label="Износ">
@@ -185,8 +249,11 @@ export default function SkinsPage() {
               })}
             </div>
             <button className="btn" type="button" disabled={!selected || !chosen} onClick={() => selected && writeSlot(selected, null)}>Сбросить</button>
+            <button className="btn primary" disabled={pending || !user.steamId} onClick={save}>
+              {pending ? "Сохраняем…" : "Сохранить набор"}
+            </button>
           </div>
-          <Rise key={selectedId}>
+          {!selected ? <p className="empty">Скины не выбраны</p> : null}
           <div className="skin-grid">
             {visibleSkins.map((skin) => {
               const active = chosen?.paint === skin.paint;
@@ -198,8 +265,7 @@ export default function SkinsPage() {
               );
             })}
           </div>
-          </Rise>
-          {visibleSkins.length === 0 ? <p className="empty">Ничего не найдено.</p> : null}
+          {selected && visibleSkins.length === 0 ? <p className="empty">Ничего не найдено.</p> : null}
         </section>
       </div>
     </>

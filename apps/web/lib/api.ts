@@ -65,6 +65,37 @@ export type ModeCard = {
   slots: number;
   status: string;
   connect: string | null;
+  playable?: boolean;
+  playersOnline?: number;
+  chip?: string;
+};
+
+export type LeaderboardRow = {
+  position: number;
+  personaName: string;
+  avatarUrl: string | null;
+  kills: number;
+  hsPercent: number;
+  kd: number;
+  hours: number;
+  points: number;
+};
+
+export type MissionItem = {
+  id: string;
+  title: string;
+  description: string;
+  progress: number;
+  target: number;
+  done: boolean;
+};
+
+export type PickemMatch = {
+  id: string;
+  title: string;
+  sideA: string;
+  sideB: string;
+  vote: "a" | "b" | null;
 };
 
 export type ChatMessage = {
@@ -112,10 +143,17 @@ export const api = {
   messages: (id: string) => request<{ messages: ChatMessage[] }>(`/lobbies/${id}/messages`),
   sendMessage: (id: string, body: string) =>
     request<ChatMessage>(`/lobbies/${id}/messages`, { method: "POST", body: JSON.stringify({ body }) }),
-  modes: () => request<{ modes: ModeCard[] }>("/modes"),
+  modes: () => request<{ modes: ModeCard[]; comingSoon: ModeCard[] }>("/modes"),
   startMode: (id: string) => request<ModeCard>(`/modes/${id}/start`, { method: "POST" }),
   stopMode: (id: string) => request<ModeCard>(`/modes/${id}/stop`, { method: "POST" }),
   profile: () => request<{ user: User; history: Lobby[] }>("/profile"),
+  leaderboard: (query = "") => request<{ rows: LeaderboardRow[]; mode: string; period: string }>(`/leaderboard${query}`),
+  missions: () => request<{ missions: MissionItem[]; completed: number; total: number }>("/missions"),
+  claimMission: (id: string) =>
+    request<{ missions: MissionItem[]; completed: number; total: number }>(`/missions/${id}/claim`, { method: "POST" }),
+  pickem: () => request<{ matches: PickemMatch[] }>("/pickem"),
+  votePickem: (id: string, side: "a" | "b") =>
+    request<{ matches: PickemMatch[] }>(`/pickem/${id}/vote`, { method: "POST", body: JSON.stringify({ side }) }),
 };
 
 export async function measurePing(): Promise<number> {
