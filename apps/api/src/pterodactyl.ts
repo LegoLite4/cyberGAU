@@ -191,27 +191,31 @@ export async function configureAndStart(slot: {
 export async function stopServer(identifier: string | null): Promise<void> {
   if (!pterodactylConfigured() || !identifier) return;
   const clientKey = env("PTERODACTYL_CLIENT_KEY");
-  // kill is faster/reliable than graceful quit (CS2 often SIGSEGV on quit).
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const power = await panelFetch(`/api/client/servers/${identifier}/power`, clientKey, {
-      method: "POST",
-      body: JSON.stringify({ signal: attempt === 0 ? "stop" : "kill" }),
-    });
-    if (power.ok || power.status === 204) break;
-    await new Promise((resolve) => setTimeout(resolve, 1000 + attempt * 400));
-  }
-  const deadline = Date.now() + 45_000;
-  while (Date.now() < deadline) {
-    const stateRes = await panelFetch(`/api/client/servers/${identifier}/resources`, clientKey);
-    const state = String((((await readJson(stateRes)).attributes ?? {}) as Json).current_state ?? "");
-    if (state === "offline") break;
-    // If graceful stop hung, force kill once more.
-    if (Date.now() > deadline - 20_000) {
-      await panelFetch(`/api/client/servers/${identifier}/power`, clientKey, {
+  // Prefer kill: CS2 dedicated often SIGSEGV on graceful quit and holds Wings lock.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const power = await panelFetch(`/api/client/servers/${identifier}/power`, clientKey, {
         method: "POST",
         body: JSON.stringify({ signal: "kill" }),
       });
+      if (power.ok || power.status === 204 || power.status === 409) {
+        // 409 = lock busy; keep retrying briefly
+        if (power.ok || power.status === 204) break;
+      }
+    } catch {
+      // ignore transient panel errors
     }
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 800 + attempt * 400));
+  }
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const stateRes = await panelFetch(`/api/client/servers/${identifier}/resources`, clientKey);
+      const state = String((((await readJson(stateRes)).attributes ?? {}) as Json).current_state ?? "");
+      if (state === "offline" || state === "") break;
+    } catch {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
   }
 }

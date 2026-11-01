@@ -116,7 +116,11 @@ async function releaseSlot(slotId: string | null | undefined) {
   if (!slotId) return;
   const slot = await prisma.serverSlot.findUnique({ where: { id: slotId } });
   if (!slot) return;
-  await stopServer(slot.identifier);
+  try {
+    await stopServer(slot.identifier);
+  } catch {
+    // Always free the pool slot even if Wings stop/kill races.
+  }
   await prisma.serverSlot.update({
     where: { id: slot.id },
     data: { status: "free", purpose: "pool", mode: null },
