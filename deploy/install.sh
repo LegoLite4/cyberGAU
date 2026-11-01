@@ -58,6 +58,11 @@ install -m 600 "$ENV_FILE" /opt/cybergau/.env
 
 if cybergau_should_run docker_stack; then
   apt-get update
+  # Не апгрейдить уже работающий qemu-guest-agent mid-install (postinst restart
+  # может убить nohup/agent и оборвать curl|bash посередине apt).
+  if dpkg -l qemu-guest-agent 2>/dev/null | grep -q '^ii'; then
+    apt-mark hold qemu-guest-agent >/dev/null 2>&1 || true
+  fi
   apt-get install -y ca-certificates curl git rsync docker.io qemu-guest-agent
   if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
     apt-get install -y docker-compose-v2
@@ -75,6 +80,7 @@ if cybergau_should_run docker_stack; then
   cybergau_step "docker + qemu-guest-agent"
   systemctl enable --now docker
   systemctl enable --now qemu-guest-agent || true
+  apt-mark unhold qemu-guest-agent >/dev/null 2>&1 || true
 
   # Путь до интернета на этой сети не пропускает кадры 1500 байт.
   if ! ping -M do -s 1472 -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
