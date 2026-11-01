@@ -142,16 +142,28 @@ export async function configureAndStart(slot: {
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
+  // Always kill→start (not restart): Wings restart keeps old container env/map.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      await panelFetch(`/api/client/servers/${slot.identifier}/power`, clientKey, {
+        method: "POST",
+        body: JSON.stringify({ signal: "kill" }),
+      });
+    } catch {
+      // ignore
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500 + attempt * 300));
+    const stateRes = await panelFetch(`/api/client/servers/${slot.identifier}/resources`, clientKey);
+    const state = String((((await readJson(stateRes)).attributes ?? {}) as Json).current_state ?? "");
+    if (state === "offline" || state === "") break;
+  }
+
   let powerOk = false;
   let lastPowerStatus = 0;
   for (let attempt = 0; attempt < 8; attempt++) {
-    const stateRes = await panelFetch(`/api/client/servers/${slot.identifier}/resources`, clientKey);
-    const stateBody = await readJson(stateRes);
-    const state = String(((stateBody.attributes ?? {}) as Json).current_state ?? "");
-    const signal = state === "running" || state === "starting" ? "restart" : "start";
     const power = await panelFetch(`/api/client/servers/${slot.identifier}/power`, clientKey, {
       method: "POST",
-      body: JSON.stringify({ signal }),
+      body: JSON.stringify({ signal: "start" }),
     });
     lastPowerStatus = power.status;
     if (power.ok || power.status === 204) {
