@@ -102,7 +102,8 @@ PANEL_PORT=${PANEL_PORT}
 PANEL_FQDN=${PANEL_FQDN}
 ALLOC_IP=${ALLOC_IP}
 CS2_MEMORY_MB=${CS2_MEMORY_MB:-4096}
-CS2_DISK_MB=${CS2_DISK_MB:-8192}
+# Hardlink pool volumes look large to Wings; keep limit above ~cs2-base size.
+CS2_DISK_MB=${CS2_DISK_MB:-90000}
 CS2_CPU=${CS2_CPU:-200}
 
 ADMIN_EMAIL=${ADMIN_EMAIL}
@@ -117,7 +118,7 @@ echo "Записан $ENV_FILE"
 echo "  ACCESS=${ACCESS}  HOST=${HOST_IP}  POOL_SIZE=${POOL_SIZE}"
 echo "  ADMIN_USER=${ADMIN_USER}  ADMIN_PASSWORD=${ADMIN_PASS}"
 echo "  STEAM_WEB_API_KEY задан"
-echo "  CS2_DISK_MB=${CS2_DISK_MB:-8192} (слот); общая база CS2: /var/lib/cybergau/cs2-base (~50–60 GB, один раз)"
+echo "  CS2_DISK_MB=${CS2_DISK_MB:-90000} (лимит слота Wings; база CS2: /var/lib/cybergau/cs2-base ~50–70 GB)"
 echo "  Для базы на диске нужно ≥70 GB свободно; 4 слота при готовой базе ≈ ~100 GB суммарно."
 if [[ -z "$STEAM_GSLT" ]]; then
   echo "  STEAM_GSLT пуст — для LAN обычно достаточно; при необходимости допишите в $ENV_FILE"
