@@ -128,12 +128,41 @@ export async function configureAndStart(slot: {
     throw new Error(`Не удалось обновить сервер: ${JSON.stringify(details.errors ?? details)}`);
   }
 
-  const power = await panelFetch(`/api/client/servers/${slot.identifier}/power`, clientKey, {
-    method: "POST",
-    body: JSON.stringify({ signal: "start" }),
-  });
-  if (!power.ok && power.status !== 204) {
-    throw new Error("Панель не запустила сервер");
+  // Egg install / previous power action can hold Wings lock — wait then retry.
+  const readyDeadline = Date.now() + 120_000;
+  while (Date.now() < readyDeadline) {
+    const stateRes = await panelFetch(`/api/client/servers/${slot.identifier}/resources`, clientKey);
+    const stateBody = await readJson(stateRes);
+    const state = String(((stateBody.attributes ?? {}) as Json).current_state ?? "");
+    if (state === "running") {
+      // Already up (e.g. rapid mode switch) — restart to apply env.
+      break;
+    }
+    if (state !== "installing" && state !== "starting") break;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  let powerOk = false;
+  let lastPowerStatus = 0;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const stateRes = await panelFetch(`/api/client/servers/${slot.identifier}/resources`, clientKey);
+    const stateBody = await readJson(stateRes);
+    const state = String(((stateBody.attributes ?? {}) as Json).current_state ?? "");
+    const signal = state === "running" || state === "starting" ? "restart" : "start";
+    const power = await panelFetch(`/api/client/servers/${slot.identifier}/power`, clientKey, {
+      method: "POST",
+      body: JSON.stringify({ signal }),
+    });
+    lastPowerStatus = power.status;
+    if (power.ok || power.status === 204) {
+      powerOk = true;
+      break;
+    }
+    // 409 / lock contention while previous stop/start finishes
+    await new Promise((resolve) => setTimeout(resolve, 1500 + attempt * 500));
+  }
+  if (!powerOk) {
+    throw new Error(`Панель не запустила сервер (HTTP ${lastPowerStatus})`);
   }
 
   const deadline = Date.now() + 180_000;
@@ -151,7 +180,7 @@ export async function configureAndStart(slot: {
       const portValue = ((allocs[0] as Json).attributes as Json | undefined)?.port;
       if (portValue) port = Number(portValue);
     }
-    if (state === "running") break;
+    if (state === "running" && port) break;
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
@@ -161,8 +190,28 @@ export async function configureAndStart(slot: {
 
 export async function stopServer(identifier: string | null): Promise<void> {
   if (!pterodactylConfigured() || !identifier) return;
-  await panelFetch(`/api/client/servers/${identifier}/power`, env("PTERODACTYL_CLIENT_KEY"), {
-    method: "POST",
-    body: JSON.stringify({ signal: "stop" }),
-  });
+  const clientKey = env("PTERODACTYL_CLIENT_KEY");
+  // kill is faster/reliable than graceful quit (CS2 often SIGSEGV on quit).
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const power = await panelFetch(`/api/client/servers/${identifier}/power`, clientKey, {
+      method: "POST",
+      body: JSON.stringify({ signal: attempt === 0 ? "stop" : "kill" }),
+    });
+    if (power.ok || power.status === 204) break;
+    await new Promise((resolve) => setTimeout(resolve, 1000 + attempt * 400));
+  }
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    const stateRes = await panelFetch(`/api/client/servers/${identifier}/resources`, clientKey);
+    const state = String((((await readJson(stateRes)).attributes ?? {}) as Json).current_state ?? "");
+    if (state === "offline") break;
+    // If graceful stop hung, force kill once more.
+    if (Date.now() > deadline - 20_000) {
+      await panelFetch(`/api/client/servers/${identifier}/power`, clientKey, {
+        method: "POST",
+        body: JSON.stringify({ signal: "kill" }),
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
 }
