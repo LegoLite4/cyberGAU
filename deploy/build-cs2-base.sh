@@ -72,15 +72,21 @@ fi
 
 CSGO="$BASE/game/csgo"
 mkdir -p "$CSGO"
+# Pin versions that match current CS2 builds; bump CSS when join segfaults in counterstrikesharp.so.
+METAMOD_URL="${METAMOD_URL:-https://mms.alliedmods.net/mmsdrop/2.0/mmsource-2.0.0-git1472-linux.tar.gz}"
+CSS_VERSION="${CSS_VERSION:-1.0.379}"
+CSS_URL="${CSS_URL:-https://github.com/roflmuffin/CounterStrikeSharp/releases/download/v${CSS_VERSION}/counterstrikesharp-with-runtime-linux-${CSS_VERSION}.zip}"
+
 curl -fsSL --connect-timeout 15 --max-time 300 --retry 5 --retry-delay 2 \
-  -o /tmp/metamod.tar.gz "https://mms.alliedmods.net/mmsdrop/2.0/mmsource-2.0.0-git1472-linux.tar.gz"
+  -o /tmp/metamod.tar.gz "$METAMOD_URL"
 tar -xzf /tmp/metamod.tar.gz -C "$CSGO"
 rm -f /tmp/metamod.tar.gz
 
 curl -fsSL --connect-timeout 15 --max-time 300 --retry 5 --retry-delay 2 \
-  -o /tmp/css.zip "https://github.com/roflmuffin/CounterStrikeSharp/releases/download/v1.0.375/counterstrikesharp-with-runtime-linux-1.0.375.zip"
+  -o /tmp/css.zip "$CSS_URL"
 unzip -o /tmp/css.zip -d "$CSGO"
 rm -f /tmp/css.zip
+echo "CounterStrikeSharp ${CSS_VERSION} installed into $CSGO/addons"
 
 mkdir -p "$CSGO/addons/counterstrikesharp/configs"
 cat > "$CSGO/addons/counterstrikesharp/configs/core.json" <<'EOF'
