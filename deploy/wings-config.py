@@ -26,13 +26,14 @@ def emit(obj, indent=0):
                 if not value:
                     lines.append(f"{sp}{key}: []")
                 else:
+                    # Always indent list items under the key (never column-0 `-`).
                     lines.append(f"{sp}{key}:")
                     for item in value:
                         if isinstance(item, (dict, list)):
-                            lines.append(f"{sp}-")
-                            lines.extend(emit(item, indent + 1))
+                            lines.append(f"{sp}  -")
+                            lines.extend(emit(item, indent + 2))
                         else:
-                            lines.append(f"{sp}- {scalar(item)}")
+                            lines.append(f"{sp}  - {scalar(item)}")
             else:
                 lines.append(f"{sp}{key}: {scalar(value)}")
     return lines
