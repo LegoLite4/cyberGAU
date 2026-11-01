@@ -192,22 +192,20 @@ export async function stopServer(identifier: string | null): Promise<void> {
   if (!pterodactylConfigured() || !identifier) return;
   const clientKey = env("PTERODACTYL_CLIENT_KEY");
   // Prefer kill: CS2 dedicated often SIGSEGV on graceful quit and holds Wings lock.
-  for (let attempt = 0; attempt < 5; attempt++) {
+  // Keep this short — nginx/proxy will 5xx if we block the HTTP handler too long.
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const power = await panelFetch(`/api/client/servers/${identifier}/power`, clientKey, {
         method: "POST",
         body: JSON.stringify({ signal: "kill" }),
       });
-      if (power.ok || power.status === 204 || power.status === 409) {
-        // 409 = lock busy; keep retrying briefly
-        if (power.ok || power.status === 204) break;
-      }
+      if (power.ok || power.status === 204) break;
     } catch {
       // ignore transient panel errors
     }
-    await new Promise((resolve) => setTimeout(resolve, 800 + attempt * 400));
+    await new Promise((resolve) => setTimeout(resolve, 400 + attempt * 300));
   }
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
     try {
       const stateRes = await panelFetch(`/api/client/servers/${identifier}/resources`, clientKey);
@@ -216,6 +214,6 @@ export async function stopServer(identifier: string | null): Promise<void> {
     } catch {
       break;
     }
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await new Promise((resolve) => setTimeout(resolve, 800));
   }
 }
