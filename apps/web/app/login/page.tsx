@@ -34,14 +34,21 @@ export default function LoginPage() {
     <section className="panel auth" style={{ padding: 22 }}>
       <p className="kicker">Аккаунт</p>
       <h1>Вход</h1>
-      <p className="lead">Логин и пароль cyberGAU. Steam для игры не нужен: он подключается в профиле и только для скинченджера.</p>
-      <form className="form" onSubmit={onSubmit} style={{ marginTop: 18 }}>
-        <label>Логин<input className="field" name="username" autoComplete="username" required minLength={3} maxLength={24} /></label>
-        <label>Пароль<input className="field" name="password" type="password" autoComplete="current-password" required minLength={8} /></label>
-        {error ? <p className="error">{error}</p> : null}
-        <button className="btn primary" disabled={pending}>{pending ? "Входим..." : "Войти"}</button>
-        <p className="meta">Нет аккаунта? <Link href="/register">Регистрация</Link></p>
-      </form>
+      <p className="lead">Основной вход — через Steam (как на площадках с лобби). Логин/пароль — запасной вариант для админа.</p>
+      <p style={{ marginTop: 16 }}>
+        <a className="btn primary" href="/backend/auth/steam">Войти через Steam</a>
+      </p>
+      <details style={{ marginTop: 22 }}>
+        <summary className="meta" style={{ cursor: "pointer" }}>Вход логином и паролем</summary>
+        <form className="form" onSubmit={onSubmit} style={{ marginTop: 14 }}>
+          <label>Логин<input className="field" name="username" autoComplete="username" required minLength={3} maxLength={24} /></label>
+          <label>Пароль<input className="field" name="password" type="password" autoComplete="current-password" required minLength={8} /></label>
+          {error ? <p className="error">{error}</p> : null}
+          <button className="btn" disabled={pending}>{pending ? "Входим..." : "Войти"}</button>
+          <p className="meta">Нет аккаунта? <Link href="/register">Регистрация</Link></p>
+        </form>
+      </details>
+      {error ? <p className="error" style={{ marginTop: 12 }}>{error}</p> : null}
     </section>
   );
 }

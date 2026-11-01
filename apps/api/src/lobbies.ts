@@ -4,8 +4,9 @@ import { FORMATS, MODES, connectString, isFormat, isMode, type ModeId } from "./
 import { mockServers, prisma, pterodactylConfigured } from "./db";
 import { configureAndStart, stopServer } from "./pterodactyl";
 
-const NO_SERVER = "Нет свободного сервера";
-const POOL_NOT_CONFIGURED = "Игровой пул не настроен (нет ключей панели)";
+const NO_SERVER = "Нет свободного сервера в пуле (все слоты заняты или пул пуст)";
+const POOL_NOT_CONFIGURED =
+  "Игровой пул не настроен: в API нет PTERODACTYL_URL / PTERODACTYL_APP_KEY / PTERODACTYL_CLIENT_KEY. Перезапустите: sudo bash /opt/cybergau/deploy/apply-env.sh";
 
 function poolUnavailableError(): Error {
   if (!mockServers() && !pterodactylConfigured()) {

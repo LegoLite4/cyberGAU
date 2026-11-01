@@ -28,8 +28,10 @@ fi
 FREE_KB="$(df -Bk --output=avail / | tail -1 | tr -dc '0-9')"
 FREE_GB=$((FREE_KB / 1024 / 1024))
 if [[ "$FREE_GB" -lt "$MIN_FREE_GB" ]]; then
-  echo "Мало места для общей базы CS2: свободно ~${FREE_GB} GB, нужно ≥${MIN_FREE_GB} GB на /"
+  echo "CODE=E_DISK Мало места для общей базы CS2: свободно ~${FREE_GB} GB, нужно ≥${MIN_FREE_GB} GB на /"
   echo "База ставится один раз в ${BASE}; слоты её шарят и не качают игру снова."
+  echo "Если диск уже расширен в гипервизоре — внутри гостя: sudo bash /opt/cybergau/deploy/grow-root-disk.sh"
+  echo "Иначе освободите место (cleanup) — установщик сам диск не увеличивает."
   exit 1
 fi
 

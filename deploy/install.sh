@@ -168,9 +168,16 @@ if cybergau_should_run skinchanger; then
 fi
 
 if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
+  # Guest-only: если гипервизор уже отдал больший диск, а раздел старый — расширим ФС.
+  if [[ -x /opt/cybergau/deploy/grow-root-disk.sh ]]; then
+    cybergau_step "grow-root-disk (guest FS only, no hypervisor resize)"
+    bash /opt/cybergau/deploy/grow-root-disk.sh || echo "grow-root-disk: skip/partial (ok if already full)"
+    cybergau_step_ok grow-root-disk
+  fi
   if cybergau_should_run cs2_base; then
     cybergau_step "build-cs2-base.sh (shared Steam install)"
     bash /opt/cybergau/deploy/build-cs2-base.sh
+    cybergau_step_ok cs2_base
     cybergau_done cs2_base
   fi
 
@@ -188,36 +195,50 @@ if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
   if cybergau_should_run acceptance; then
     cybergau_step "acceptance: keys in container, nginx, wings, ServerSlot, plugin.zip"
     if ! grep -q '^PTERODACTYL_APP_KEY=.\+' /etc/cybergau/env || ! grep -q '^PTERODACTYL_CLIENT_KEY=.\+' /etc/cybergau/env; then
-      echo "Ключи PTERODACTYL_APP_KEY / PTERODACTYL_CLIENT_KEY пусты в /etc/cybergau/env"
+      cybergau_step_fail E_KEYS
+      echo "CODE=E_KEYS Ключи PTERODACTYL_APP_KEY / PTERODACTYL_CLIENT_KEY пусты в /etc/cybergau/env"
       exit 1
     fi
     if [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_APP_KEY 2>/dev/null || true)" ]] \
       || [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_CLIENT_KEY 2>/dev/null || true)" ]]; then
-      echo "Ключи панели есть в файле, но НЕ внутри контейнера api — пул не заработает."
+      echo "Ключи в файле есть, в контейнере нет — повторный apply-env"
+      bash /opt/cybergau/deploy/apply-env.sh || true
+    fi
+    if [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_APP_KEY 2>/dev/null || true)" ]] \
+      || [[ -z "$(docker exec cybergau-api-1 printenv PTERODACTYL_CLIENT_KEY 2>/dev/null || true)" ]]; then
+      cybergau_step_fail E_KEYS
+      echo "CODE=E_KEYS Ключи панели есть в файле, но НЕ внутри контейнера api — пул не заработает."
       echo "Запустите: sudo bash /opt/cybergau/deploy/apply-env.sh"
       exit 1
     fi
     if ! systemctl is-active --quiet nginx; then
-      echo "nginx не активен после установки панели"
+      cybergau_step_fail E_NGINX
+      echo "CODE=E_NGINX nginx не активен после установки панели"
       systemctl status nginx --no-pager -l || true
       exit 1
     fi
     if ! systemctl is-active --quiet wings; then
-      echo "wings не активен после установки панели"
+      cybergau_step_fail E_WINGS
+      echo "CODE=E_WINGS wings не активен после установки панели"
       systemctl status wings --no-pager -l || true
       journalctl -u wings -n 40 --no-pager || true
       exit 1
     fi
 
+    # Kick syncPanelServers by recreating api once more if pool empty early
     ok=0
     slots=0
     plugin_ok=0
-    for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-      echo "acceptance attempt ${attempt}/12 (slots=${slots:-0} plugin=${plugin_ok})"
+    for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
+      echo "acceptance attempt ${attempt}/18 (slots=${slots:-0} plugin=${plugin_ok})"
       if curl -sf --max-time 5 "${WEB}/backend/health" >/dev/null 2>&1 \
         || docker exec cybergau-api-1 wget -q -O /dev/null http://127.0.0.1:4000/health 2>/dev/null; then
         slots="$(docker exec cybergau-postgres-1 psql -U "${POSTGRES_USER:-cybergau}" -d "${POSTGRES_DB:-cybergau}" -Atc \
           "SELECT count(*) FROM \"ServerSlot\" WHERE status='free' AND purpose='pool';" 2>/dev/null || echo 0)"
+        if [[ "${slots:-0}" -lt 1 && "$attempt" -eq 3 ]]; then
+          echo "ServerSlot ещё пуст — force-recreate api для syncPanelServers"
+          bash /opt/cybergau/deploy/apply-env.sh || true
+        fi
         if curl -sfI --max-time 5 "${WEB}/backend/skins/plugin.zip" 2>/dev/null | head -n1 | grep -qE 'HTTP/[0-9.]+ 200'; then
           plugin_ok=1
         elif docker exec cybergau-api-1 wget -q -S -O /dev/null http://127.0.0.1:4000/skins/plugin.zip 2>&1 | grep -q '200 OK'; then
@@ -231,6 +252,15 @@ if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
       sleep 5
     done
     if [[ "$ok" != "1" ]]; then
+      if [[ "${slots:-0}" -lt 1 ]]; then
+        cybergau_step_fail E_POOL
+        echo "CODE=E_POOL Нет свободного ServerSlot (purpose=pool). Панель/пул не синхронизированы."
+      elif [[ "$plugin_ok" != "1" ]]; then
+        cybergau_step_fail E_PLUGIN
+        echo "CODE=E_PLUGIN skins/plugin.zip недоступен"
+      else
+        cybergau_step_fail E_ACCEPT
+      fi
       echo "Панель/пул/скины не готовы после install (free ServerSlot=${slots:-0}, plugin.zip ok=${plugin_ok})."
       echo "Проверьте: systemctl status nginx wings; ключи PTERODACTYL_* в /etc/cybergau/env; ${WEB}/backend/skins/plugin.zip"
       echo "Ключи в контейнере: APP=$(docker exec cybergau-api-1 printenv PTERODACTYL_APP_KEY 2>/dev/null | wc -c) CLIENT=$(docker exec cybergau-api-1 printenv PTERODACTYL_CLIENT_KEY 2>/dev/null | wc -c)"
@@ -239,6 +269,7 @@ if [[ "${INSTALL_PTERODACTYL:-0}" == "1" ]]; then
       exit 1
     fi
     echo "Игровой пул готов: ${slots} свободный слот(ов); скинченджер: ${WEB}/backend/skins/plugin.zip"
+    cybergau_step_ok acceptance
     cybergau_done acceptance
   fi
 fi

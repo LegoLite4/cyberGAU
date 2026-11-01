@@ -4,7 +4,7 @@ import cors from "@fastify/cors";
 import { z } from "zod";
 import { createReadStream } from "fs";
 import { stat } from "fs/promises";
-import { clearSession, currentUser, hashPassword, linkSteam, openSession, requireUser, steamLoginUrl, toPublicUser, verifyPassword, verifySteam } from "./auth";
+import { authMode, clearSession, currentUser, hashPassword, linkSteam, loginOrRegisterSteam, openSession, requireUser, steamLoginUrl, toPublicUser, verifyPassword, verifySteam } from "./auth";
 import { FORMATS, MAPS, isFormat } from "./catalog";
 import { prisma, publicWebUrl } from "./db";
 import { ensureMockSlot, listLobbies, listModes, newInviteCode, startLobby, startMode, stopLobby, stopMode, toLobbyDto } from "./lobbies";
@@ -25,7 +25,7 @@ function statusOf(error: unknown): number {
   }
   const message = error instanceof Error ? error.message : "";
   if (message.includes("не найдено")) return 404;
-  if (message.includes("только создатель") || message.includes("Нужен вход")) return 403;
+  if (message.includes("только создатель") || message.includes("Нужен вход") || message.includes("Нужно войти")) return 403;
   return 400;
 }
 
@@ -84,7 +84,8 @@ app.post("/auth/login", async (request, reply) => {
 
 app.get("/auth/steam", async (request, reply) => {
   const user = await currentUser(request);
-  if (!user) {
+  // steam_first: можно войти сразу через Steam. local: сначала логин/пароль, Steam — привязка.
+  if (!user && authMode() === "local") {
     reply.redirect(`${publicWebUrl()}/login?error=${encodeURIComponent("Сначала войдите логином и паролем, затем привяжите Steam")}`);
     return;
   }
@@ -94,17 +95,23 @@ app.get("/auth/steam", async (request, reply) => {
 app.get("/auth/steam/callback", async (request, reply) => {
   const web = publicWebUrl();
   try {
-    const user = await currentUser(request);
-    if (!user) {
+    const steamId = await verifySteam(request.query as Record<string, string>);
+    const existing = await currentUser(request);
+    if (existing) {
+      await linkSteam(existing.id, steamId);
+      reply.redirect(`${web}/profile?steam=linked`);
+      return;
+    }
+    if (authMode() === "local") {
       reply.redirect(`${web}/login?error=${encodeURIComponent("Сначала войдите логином и паролем, затем привяжите Steam")}`);
       return;
     }
-    const steamId = await verifySteam(request.query as Record<string, string>);
-    await linkSteam(user.id, steamId);
-    reply.redirect(`${web}/profile?steam=linked`);
+    const user = await loginOrRegisterSteam(steamId);
+    await openSession(reply, user.id);
+    reply.redirect(`${web}/?steam=login`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Steam не привязан";
-    reply.redirect(`${web}/profile?error=${encodeURIComponent(message)}`);
+    reply.redirect(`${web}/login?error=${encodeURIComponent(message)}`);
   }
 });
 

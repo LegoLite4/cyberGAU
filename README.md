@@ -21,10 +21,15 @@
 Одна публичная ссылка — клон, автонастройка и установка:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/LegoLite4/cyberGAU/main/deploy/get.sh \
+  | sudo STEAM_WEB_API_KEY=ВАШ_КЛЮЧ bash
 ```
 
-`get.sh` кладёт код в `/opt/cybergau`, пишет `/etc/cybergau/env` (пароли и IP с основного интерфейса: 192.168.x / 10.x / …), ставит Docker, сайт, API, PostgreSQL, `cybergau.service`, панель Pterodactyl и пул CS2. По умолчанию `CYBERGAU_ACCESS=lan`. Переопределения: `CYBERGAU_ACCESS=wireguard`, `STEAM_WEB_API_KEY=...`, `WG_ENDPOINT=ip:51820`, `POOL_SIZE=1`, `FORCE_ENV=1`, `FORCE_INSTALL=1` (полный перезапуск без skip).
+Ключ: https://steamcommunity.com/dev/apikey (домен: `localhost` или LAN-IP машины). Без `STEAM_WEB_API_KEY` установщик сразу выходит.
+
+`get.sh` кладёт код в `/opt/cybergau`, пишет `/etc/cybergau/env` (пароли и IP с основного интерфейса: 192.168.x / 10.x / …), ставит Docker, сайт, API, PostgreSQL, `cybergau.service`, панель Pterodactyl и пул CS2. Ключи панели (`PTERODACTYL_*`) создаются автоматически. По умолчанию `CYBERGAU_ACCESS=lan`. Переопределения: `CYBERGAU_ACCESS=wireguard`, `STEAM_GSLT=...`, `WG_ENDPOINT=ip:51820`, `POOL_SIZE=1`, `FORCE_ENV=1`, `FORCE_INSTALL=1` (полный перезапуск без skip).
+
+Лог: `/var/log/cybergau-install.log`. При ошибке: `tail -n 250 /var/log/cybergau-install.log`.
 
 Повторный запуск установщика продолжает с прерванного шага: уже готовые docker/skinchanger/cs2-base/panel пропускаются (состояние в `/var/lib/cybergau/install-state`).
 

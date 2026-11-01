@@ -86,10 +86,12 @@ export async function configureAndStart(slot: {
   identifier: string | null;
 }, settings: GameSettings): Promise<{ host: string; port: number }> {
   if (!pterodactylConfigured()) {
-    throw new Error("Игровой пул не настроен (нет ключей панели)");
+    throw new Error(
+      "Игровой пул не настроен: нет ключей панели в API (PTERODACTYL_URL/APP_KEY/CLIENT_KEY). sudo bash /opt/cybergau/deploy/apply-env.sh",
+    );
   }
   if (!slot.pterodactylId || !slot.identifier) {
-    throw new Error("Нет свободного сервера");
+    throw new Error("Нет свободного сервера в пуле (слот без pterodactylId/identifier)");
   }
   const appKey = env("PTERODACTYL_APP_KEY");
   const clientKey = env("PTERODACTYL_CLIENT_KEY");

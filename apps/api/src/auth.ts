@@ -5,6 +5,11 @@ import { env, prisma, publicWebUrl } from "./db";
 
 const COOKIE = "cybergau_session";
 
+export function authMode(): "steam_first" | "local" {
+  const mode = env("AUTH_MODE", "steam_first").trim().toLowerCase();
+  return mode === "local" ? "local" : "steam_first";
+}
+
 export function steamLoginUrl(): string {
   const web = publicWebUrl();
   const params = new URLSearchParams({
@@ -63,22 +68,24 @@ export function verifyPassword(password: string, stored: string): boolean {
   return timingSafeEqual(hash, expected);
 }
 
-type SteamProfile = { avatarUrl: string | null; cs2Hours: number | null };
+type SteamProfile = { avatarUrl: string | null; cs2Hours: number | null; personaName: string | null };
 
 async function fetchSteamProfile(steamId: string): Promise<SteamProfile> {
   let avatarUrl: string | null = null;
   let cs2Hours: number | null = null;
+  let personaName: string | null = null;
   const key = env("STEAM_WEB_API_KEY");
-  if (!key) return { avatarUrl, cs2Hours };
+  if (!key) return { avatarUrl, cs2Hours, personaName };
   const summary = await fetch(
     `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${key}&steamids=${steamId}`,
   );
   if (summary.ok) {
     const payload = (await summary.json()) as {
-      response?: { players?: Array<{ avatarfull?: string }> };
+      response?: { players?: Array<{ avatarfull?: string; personaname?: string }> };
     };
     const player = payload.response?.players?.[0];
     if (player?.avatarfull) avatarUrl = player.avatarfull;
+    if (player?.personaname) personaName = player.personaname;
   }
   const games = await fetch(
     `https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=${key}&steamid=${steamId}&include_appinfo=0&appids_filter[0]=730`,
@@ -90,7 +97,7 @@ async function fetchSteamProfile(steamId: string): Promise<SteamProfile> {
     const cs2 = payload.response?.games?.find((game) => game.appid === 730);
     if (cs2?.playtime_forever !== undefined) cs2Hours = Math.floor(cs2.playtime_forever / 60);
   }
-  return { avatarUrl, cs2Hours };
+  return { avatarUrl, cs2Hours, personaName };
 }
 
 export async function linkSteam(userId: string, steamId: string): Promise<User> {
@@ -103,6 +110,31 @@ export async function linkSteam(userId: string, steamId: string): Promise<User> 
     where: { id: userId },
     data: {
       steamId,
+      avatarUrl: profile.avatarUrl,
+      cs2Hours: profile.cs2Hours,
+    },
+  });
+}
+
+/** Steam-first: найти или создать пользователя по SteamID и обновить профиль. */
+export async function loginOrRegisterSteam(steamId: string): Promise<User> {
+  const profile = await fetchSteamProfile(steamId);
+  const personaName = profile.personaName || `Steam ${steamId.slice(-4)}`;
+  const existing = await prisma.user.findUnique({ where: { steamId } });
+  if (existing) {
+    return prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        personaName: profile.personaName ?? existing.personaName,
+        avatarUrl: profile.avatarUrl ?? existing.avatarUrl,
+        cs2Hours: profile.cs2Hours ?? existing.cs2Hours,
+      },
+    });
+  }
+  return prisma.user.create({
+    data: {
+      steamId,
+      personaName,
       avatarUrl: profile.avatarUrl,
       cs2Hours: profile.cs2Hours,
     },
