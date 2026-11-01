@@ -125,6 +125,22 @@ printf '%s\n' "{\"ApiBase\":\"${API_BASE}\"}" \
   > "$CSGO/addons/counterstrikesharp/plugins/CybergauSkins/config.json"
 test -f "$CSGO/addons/counterstrikesharp/plugins/CybergauSkins/CybergauSkins.dll"
 
+# Mode/server cfg overrides (no bots filling custom lobbies).
+CFG_SRC="${CS2_CFG_DIR:-/opt/cybergau/deploy/cs2-cfg}"
+CFG_DEST="$CSGO/cfg"
+mkdir -p "$CFG_DEST"
+if [[ -d "$CFG_SRC" ]]; then
+  cp -a "$CFG_SRC"/. "$CFG_DEST"/
+fi
+for mode_cfg in "${CFG_DEST}"/gamemode_*.cfg; do
+  [[ -f "$mode_cfg" ]] || continue
+  [[ "$mode_cfg" == *_server.cfg ]] && continue
+  sed -i -E \
+    -e 's/^bot_quota[[:space:]].*/bot_quota\t\t\t\t\t\t\t0/' \
+    -e 's/^bot_quota_mode[[:space:]].*/bot_quota_mode\t\t\t\t\t\t\tnormal/' \
+    "$mode_cfg" || true
+done
+
 # Wings/containers обычно работают от pterodactyl (uid 999) или root — открываем чтение.
 chmod -R a+rX "$BASE" || true
 
